@@ -1,0 +1,22 @@
+{
+  "name": "GuidedAnswer",
+  "type": "object",
+  "properties": {
+    "presentation_id": {
+      "type": "string"
+    },
+    "guided_question_id": {
+      "type": "string"
+    },
+    "answer_text": {
+      "type": "string"
+    },
+    "answer_json": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "presentation_id",
+    "guided_question_id"
+  ]
+}

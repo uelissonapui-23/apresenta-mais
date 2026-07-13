@@ -1,0 +1,45 @@
+{
+  "name": "LibraryItem",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "item_type": {
+      "type": "string",
+      "enum": [
+        "citation",
+        "story",
+        "example",
+        "reference",
+        "application",
+        "question",
+        "block"
+      ],
+      "default": "citation"
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "string"
+    },
+    "is_favorite": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "user_id",
+    "title"
+  ]
+}

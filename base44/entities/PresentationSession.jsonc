@@ -1,0 +1,64 @@
+{
+  "name": "PresentationSession",
+  "type": "object",
+  "properties": {
+    "presentation_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "session_type": {
+      "type": "string",
+      "enum": [
+        "rehearsal",
+        "presentation"
+      ],
+      "default": "rehearsal"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "paused",
+        "completed"
+      ],
+      "default": "active"
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "paused_at": {
+      "type": "string"
+    },
+    "finished_at": {
+      "type": "string"
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "default": 0
+    },
+    "planned_duration_seconds": {
+      "type": "number",
+      "default": 0
+    },
+    "current_block_id": {
+      "type": "string"
+    },
+    "completed_count": {
+      "type": "number",
+      "default": 0
+    },
+    "skipped_count": {
+      "type": "number",
+      "default": 0
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "presentation_id",
+    "user_id"
+  ]
+}

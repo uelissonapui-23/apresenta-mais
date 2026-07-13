@@ -1,0 +1,35 @@
+{
+  "name": "AppTip",
+  "type": "object",
+  "properties": {
+    "presentation_type_id": {
+      "type": "string"
+    },
+    "objective_id": {
+      "type": "string"
+    },
+    "communication_style_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "trigger_type": {
+      "type": "string"
+    },
+    "rule_json": {
+      "type": "string"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "title",
+    "message"
+  ]
+}

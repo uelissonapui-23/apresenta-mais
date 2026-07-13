@@ -1,0 +1,48 @@
+{
+  "name": "SessionBlockProgress",
+  "type": "object",
+  "properties": {
+    "session_id": {
+      "type": "string"
+    },
+    "block_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "current",
+        "completed",
+        "skipped",
+        "revisit"
+      ],
+      "default": "pending"
+    },
+    "started_at": {
+      "type": "string"
+    },
+    "completed_at": {
+      "type": "string"
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "default": 0
+    },
+    "visit_count": {
+      "type": "number",
+      "default": 0
+    },
+    "order_used": {
+      "type": "number",
+      "default": 0
+    },
+    "note": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "session_id",
+    "block_id"
+  ]
+}

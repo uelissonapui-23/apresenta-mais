@@ -1,0 +1,75 @@
+{
+  "name": "PresentationTheme",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "thumbnail_url": {
+      "type": "string"
+    },
+    "background_color": {
+      "type": "string",
+      "default": "#FFFFFF"
+    },
+    "text_color": {
+      "type": "string",
+      "default": "#1A1A1A"
+    },
+    "title_color": {
+      "type": "string",
+      "default": "#111111"
+    },
+    "accent_color": {
+      "type": "string",
+      "default": "#3B82F6"
+    },
+    "title_font": {
+      "type": "string",
+      "default": "Inter"
+    },
+    "body_font": {
+      "type": "string",
+      "default": "Inter"
+    },
+    "default_title_size": {
+      "type": "number",
+      "default": 32
+    },
+    "default_body_size": {
+      "type": "number",
+      "default": 18
+    },
+    "default_alignment": {
+      "type": "string",
+      "enum": [
+        "left",
+        "center",
+        "right"
+      ],
+      "default": "left"
+    },
+    "transition_type": {
+      "type": "string",
+      "default": "fade"
+    },
+    "is_official": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_premium": {
+      "type": "boolean",
+      "default": false
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

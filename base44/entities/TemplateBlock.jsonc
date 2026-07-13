@@ -1,0 +1,51 @@
+{
+  "name": "TemplateBlock",
+  "type": "object",
+  "properties": {
+    "template_id": {
+      "type": "string"
+    },
+    "parent_id": {
+      "type": "string"
+    },
+    "block_type_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "presenter_notes": {
+      "type": "string"
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    },
+    "depth_level": {
+      "type": "number",
+      "default": 0
+    },
+    "importance_level": {
+      "type": "number",
+      "default": 3
+    },
+    "estimated_duration_seconds": {
+      "type": "number",
+      "default": 60
+    },
+    "is_essential": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "template_id",
+    "title"
+  ]
+}

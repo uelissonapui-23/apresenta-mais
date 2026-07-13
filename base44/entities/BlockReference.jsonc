@@ -1,0 +1,31 @@
+{
+  "name": "BlockReference",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "type": "string"
+    },
+    "reference_type": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "reference_text": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    },
+    "url": {
+      "type": "string"
+    },
+    "metadata_json": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "block_id",
+    "title"
+  ]
+}

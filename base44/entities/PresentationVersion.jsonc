@@ -1,0 +1,26 @@
+{
+  "name": "PresentationVersion",
+  "type": "object",
+  "properties": {
+    "presentation_id": {
+      "type": "string"
+    },
+    "version_number": {
+      "type": "number",
+      "default": 1
+    },
+    "snapshot_json": {
+      "type": "string"
+    },
+    "change_summary": {
+      "type": "string"
+    },
+    "created_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "presentation_id",
+    "version_number"
+  ]
+}

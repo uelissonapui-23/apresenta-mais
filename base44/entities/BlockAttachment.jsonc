@@ -1,0 +1,39 @@
+{
+  "name": "BlockAttachment",
+  "type": "object",
+  "properties": {
+    "block_id": {
+      "type": "string"
+    },
+    "attachment_type": {
+      "type": "string",
+      "enum": [
+        "image",
+        "video",
+        "audio",
+        "document",
+        "link"
+      ]
+    },
+    "file_url": {
+      "type": "string"
+    },
+    "thumbnail_url": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "block_id",
+    "attachment_type"
+  ]
+}

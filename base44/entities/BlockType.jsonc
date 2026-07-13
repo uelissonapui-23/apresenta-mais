@@ -1,0 +1,50 @@
+{
+  "name": "BlockType",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "icon": {
+      "type": "string"
+    },
+    "supports_title": {
+      "type": "boolean",
+      "default": true
+    },
+    "supports_summary": {
+      "type": "boolean",
+      "default": true
+    },
+    "supports_content": {
+      "type": "boolean",
+      "default": true
+    },
+    "supports_notes": {
+      "type": "boolean",
+      "default": true
+    },
+    "supports_attachment": {
+      "type": "boolean",
+      "default": false
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "name",
+    "code"
+  ]
+}

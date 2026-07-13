@@ -1,0 +1,70 @@
+{
+  "name": "UserPreference",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "default_theme_id": {
+      "type": "string"
+    },
+    "default_view_mode": {
+      "type": "string",
+      "enum": [
+        "structure",
+        "text",
+        "cards",
+        "script"
+      ],
+      "default": "structure"
+    },
+    "default_detail_level": {
+      "type": "string",
+      "enum": [
+        "compact",
+        "normal",
+        "detailed",
+        "complete"
+      ],
+      "default": "normal"
+    },
+    "default_font_size": {
+      "type": "number",
+      "default": 16
+    },
+    "presentation_font_size": {
+      "type": "number",
+      "default": 24
+    },
+    "use_dark_mode": {
+      "type": "boolean",
+      "default": false
+    },
+    "show_timer": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_next_block": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_progress": {
+      "type": "boolean",
+      "default": true
+    },
+    "auto_mark_completed": {
+      "type": "boolean",
+      "default": true
+    },
+    "confirm_before_restart": {
+      "type": "boolean",
+      "default": true
+    },
+    "accessibility_settings_json": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id"
+  ]
+}

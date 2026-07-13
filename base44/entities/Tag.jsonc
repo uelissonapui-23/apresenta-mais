@@ -1,0 +1,20 @@
+{
+  "name": "Tag",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "color": {
+      "type": "string",
+      "default": "#3B82F6"
+    }
+  },
+  "required": [
+    "user_id",
+    "name"
+  ]
+}

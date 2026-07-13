@@ -1,0 +1,97 @@
+{
+  "name": "Presentation",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "subtitle": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "presentation_type_id": {
+      "type": "string"
+    },
+    "objective_id": {
+      "type": "string"
+    },
+    "communication_style_id": {
+      "type": "string"
+    },
+    "audience": {
+      "type": "string"
+    },
+    "audience_knowledge_level": {
+      "type": "string",
+      "enum": [
+        "beginner",
+        "intermediate",
+        "advanced",
+        "mixed"
+      ],
+      "default": "mixed"
+    },
+    "main_theme": {
+      "type": "string"
+    },
+    "main_message": {
+      "type": "string"
+    },
+    "estimated_duration_minutes": {
+      "type": "number",
+      "default": 30
+    },
+    "theme_id": {
+      "type": "string"
+    },
+    "default_view_mode": {
+      "type": "string",
+      "enum": [
+        "structure",
+        "text",
+        "cards",
+        "script"
+      ],
+      "default": "structure"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "ready",
+        "in_progress",
+        "completed",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "progress_percentage": {
+      "type": "number",
+      "default": 0
+    },
+    "is_favorite": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_archived": {
+      "type": "boolean",
+      "default": false
+    },
+    "current_version": {
+      "type": "number",
+      "default": 1
+    },
+    "last_opened_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "title"
+  ]
+}

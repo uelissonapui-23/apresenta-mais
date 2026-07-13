@@ -1,0 +1,57 @@
+{
+  "name": "Plan",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "price": {
+      "type": "number",
+      "default": 0
+    },
+    "billing_period": {
+      "type": "string",
+      "enum": [
+        "monthly",
+        "yearly",
+        "lifetime",
+        "free"
+      ],
+      "default": "free"
+    },
+    "max_presentations": {
+      "type": "number",
+      "default": -1
+    },
+    "max_storage": {
+      "type": "number",
+      "default": -1
+    },
+    "can_export_pdf": {
+      "type": "boolean",
+      "default": false
+    },
+    "can_use_ai": {
+      "type": "boolean",
+      "default": false
+    },
+    "can_use_premium_templates": {
+      "type": "boolean",
+      "default": false
+    },
+    "can_sync_devices": {
+      "type": "boolean",
+      "default": false
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

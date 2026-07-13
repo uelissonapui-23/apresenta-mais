@@ -1,0 +1,32 @@
+{
+  "name": "GuidedFlow",
+  "type": "object",
+  "properties": {
+    "presentation_type_id": {
+      "type": "string"
+    },
+    "objective_id": {
+      "type": "string"
+    },
+    "communication_style_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

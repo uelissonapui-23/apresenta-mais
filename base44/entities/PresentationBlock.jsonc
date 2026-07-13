@@ -1,0 +1,75 @@
+{
+  "name": "PresentationBlock",
+  "type": "object",
+  "properties": {
+    "presentation_id": {
+      "type": "string"
+    },
+    "parent_id": {
+      "type": "string"
+    },
+    "block_type_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "additional_content": {
+      "type": "string"
+    },
+    "presenter_notes": {
+      "type": "string"
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    },
+    "depth_level": {
+      "type": "number",
+      "default": 0
+    },
+    "importance_level": {
+      "type": "number",
+      "default": 3
+    },
+    "estimated_duration_seconds": {
+      "type": "number",
+      "default": 60
+    },
+    "is_essential": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_hidden": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_collapsed": {
+      "type": "boolean",
+      "default": false
+    },
+    "show_to_audience": {
+      "type": "boolean",
+      "default": true
+    },
+    "icon": {
+      "type": "string"
+    },
+    "background_style": {
+      "type": "string"
+    },
+    "text_style": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "presentation_id",
+    "title"
+  ]
+}

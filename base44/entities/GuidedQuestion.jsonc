@@ -1,0 +1,55 @@
+{
+  "name": "GuidedQuestion",
+  "type": "object",
+  "properties": {
+    "guided_flow_id": {
+      "type": "string"
+    },
+    "question_text": {
+      "type": "string"
+    },
+    "help_text": {
+      "type": "string"
+    },
+    "field_type": {
+      "type": "string",
+      "enum": [
+        "text",
+        "textarea",
+        "select",
+        "multiselect",
+        "number",
+        "boolean"
+      ],
+      "default": "textarea"
+    },
+    "options_json": {
+      "type": "string"
+    },
+    "required": {
+      "type": "boolean",
+      "default": false
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    },
+    "destination_field": {
+      "type": "string"
+    },
+    "block_type_to_generate": {
+      "type": "string"
+    },
+    "conditional_rule_json": {
+      "type": "string"
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "guided_flow_id",
+    "question_text"
+  ]
+}

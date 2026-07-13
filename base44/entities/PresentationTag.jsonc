@@ -1,0 +1,16 @@
+{
+  "name": "PresentationTag",
+  "type": "object",
+  "properties": {
+    "presentation_id": {
+      "type": "string"
+    },
+    "tag_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "presentation_id",
+    "tag_id"
+  ]
+}
