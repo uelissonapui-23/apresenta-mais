@@ -76,10 +76,18 @@ export default function PresentationEditor() {
       parent_id: parentId || null,
       block_type_id: blockType.id,
       title: '',
+      summary: '',
+      content: '',
+      additional_content: '',
+      presenter_notes: '',
       order_index: orderIndex,
       depth_level: depth,
       importance_level: 3,
       estimated_duration_seconds: 60,
+      is_essential: false,
+      is_hidden: false,
+      is_collapsed: false,
+      show_to_audience: true,
     });
     setBlocks(prev => [...prev, newBlock]);
     setSaveStatus('saved');
@@ -116,7 +124,11 @@ export default function PresentationEditor() {
   };
 
   const handleMoveUp = async (blockId) => {
-    const sorted = [...blocks].sort((a, b) => a.order_index - b.order_index);
+    const currentBlock = blocks.find(b => b.id === blockId);
+    if (!currentBlock) return;
+    const sorted = blocks
+      .filter(b => (b.parent_id || null) === (currentBlock.parent_id || null))
+      .sort((a, b) => a.order_index - b.order_index);
     const idx = sorted.findIndex(b => b.id === blockId);
     if (idx <= 0) return;
     const current = sorted[idx];
@@ -133,7 +145,11 @@ export default function PresentationEditor() {
   };
 
   const handleMoveDown = async (blockId) => {
-    const sorted = [...blocks].sort((a, b) => a.order_index - b.order_index);
+    const currentBlock = blocks.find(b => b.id === blockId);
+    if (!currentBlock) return;
+    const sorted = blocks
+      .filter(b => (b.parent_id || null) === (currentBlock.parent_id || null))
+      .sort((a, b) => a.order_index - b.order_index);
     const idx = sorted.findIndex(b => b.id === blockId);
     if (idx >= sorted.length - 1) return;
     const current = sorted[idx];
@@ -152,7 +168,9 @@ export default function PresentationEditor() {
   const handleIndent = async (blockId) => {
     const block = blocks.find(b => b.id === blockId);
     if (!block) return;
-    const sorted = [...blocks].sort((a, b) => a.order_index - b.order_index);
+    const sorted = blocks
+      .filter(b => (b.parent_id || null) === (block.parent_id || null))
+      .sort((a, b) => a.order_index - b.order_index);
     const idx = sorted.findIndex(b => b.id === blockId);
     const prevBlock = idx > 0 ? sorted[idx - 1] : null;
     if (!prevBlock) return;
