@@ -50,6 +50,15 @@ import BlockAttachmentsDisplay from '@/components/shared/BlockAttachmentsDisplay
 
 const SAVE_INTERVAL_MS = 15000;
 
+const DEFAULT_PREFERENCES = {
+  show_timer: true,
+  show_next_block: true,
+  show_progress: true,
+  auto_mark_completed: true,
+  confirm_before_restart: true,
+  accessibility_settings_json: {},
+};
+
 const STATUS_META = {
   pending: {
     label: 'Pendente',
@@ -186,6 +195,7 @@ export default function Rehearsal() {
   const [showAdditionalContent, setShowAdditionalContent] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [finalNotes, setFinalNotes] = useState('');
+  const [preferences, setPreferences] = useState(DEFAULT_PREFERENCES);
 
   const mountedRef = useRef(true);
   const saveInFlightRef = useRef(false);
@@ -235,6 +245,13 @@ export default function Rehearsal() {
     ? progressMap[currentBlock.id]?.status || 'pending'
     : 'pending';
 
+  const accessibility = preferences.accessibility_settings_json || {};
+  const largeControls = Boolean(accessibility.large_controls || accessibility.controls_larger);
+  const reduceMotion = Boolean(accessibility.reduce_motion || accessibility.reduced_motion);
+  const highContrast = Boolean(accessibility.high_contrast);
+  const leftAlignedText = Boolean(accessibility.left_aligned_text || accessibility.text_left_aligned);
+  const expandedSpacing = Boolean(accessibility.expanded_spacing || accessibility.increased_spacing);
+
   const loadPage = useCallback(async () => {
     if (!id || !user?.id) return;
 
@@ -242,7 +259,7 @@ export default function Rehearsal() {
     setLoadError('');
 
     try {
-      const [presentationData, blockRows, sessionRows] = await Promise.all([
+      const [presentationData, blockRows, sessionRows, preferenceRows] = await Promise.all([
         base44.entities.Presentation.get(id),
         base44.entities.PresentationBlock.filter({ presentation_id: id }, 'order_index'),
         base44.entities.PresentationSession.filter(
@@ -254,12 +271,30 @@ export default function Rehearsal() {
           '-created_date',
           20,
         ),
+        base44.entities.UserPreference.filter(
+          { user_id: user.id },
+          '-updated_date',
+          1,
+        ),
       ]);
 
       if (!mountedRef.current) return;
 
       const safeBlocks = Array.isArray(blockRows) ? blockRows : [];
       const safeSessions = Array.isArray(sessionRows) ? sessionRows : [];
+      const safePreferences = Array.isArray(preferenceRows) ? preferenceRows : [];
+      const savedPreference = safePreferences[0] || {};
+
+      setPreferences({
+        ...DEFAULT_PREFERENCES,
+        ...savedPreference,
+        show_timer: savedPreference.show_timer !== false,
+        show_next_block: savedPreference.show_next_block !== false,
+        show_progress: savedPreference.show_progress !== false,
+        auto_mark_completed: savedPreference.auto_mark_completed !== false,
+        confirm_before_restart: savedPreference.confirm_before_restart !== false,
+        accessibility_settings_json: savedPreference.accessibility_settings_json || {},
+      });
       const active = safeSessions.find(
         (item) => item.status === 'active' || item.status === 'paused',
       );
@@ -451,6 +486,15 @@ export default function Rehearsal() {
     }
   }, [createProgressRows, finishExistingSession, id, plannedSeconds, toast, user?.id, visibleBlocks]);
 
+  const requestRestart = useCallback(() => {
+    if (preferences.confirm_before_restart !== false) {
+      setShowRestartDialog(true);
+      return;
+    }
+
+    startNewSession({ restart: true });
+  }, [preferences.confirm_before_restart, startNewSession]);
+
   const continueExistingSession = useCallback(async () => {
     if (!existingSession?.id) return;
 
@@ -557,6 +601,12 @@ export default function Rehearsal() {
     await saveSessionSnapshot({ force: true });
     setShowEndDialog(true);
   }, [currentBlock, currentIndex, saveSessionSnapshot, setOnlyCurrentBlock, updateProgressRow, visibleBlocks.length]);
+
+  const advanceUsingPreference = useCallback(async () => {
+    await moveToNext({
+      status: preferences.auto_mark_completed !== false ? 'completed' : 'pending',
+    });
+  }, [moveToNext, preferences.auto_mark_completed]);
 
   const moveToPrevious = useCallback(async () => {
     if (currentIndex <= 0) return;
@@ -677,7 +727,7 @@ export default function Rehearsal() {
 
       if (event.key === 'ArrowRight' || event.key === 'PageDown') {
         event.preventDefault();
-        moveToNext();
+        advanceUsingPreference();
       }
 
       if (event.key === 'ArrowLeft' || event.key === 'PageUp') {
@@ -694,7 +744,7 @@ export default function Rehearsal() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isRunning, moveToNext, moveToPrevious, pauseSession, resumeSession, session?.id, showContinueDialog, showEndDialog, showRestartDialog]);
+  }, [advanceUsingPreference, isRunning, moveToPrevious, pauseSession, resumeSession, session?.id, showContinueDialog, showEndDialog, showRestartDialog]);
 
   if (userLoading || loading) return <LoadingScreen />;
 
@@ -776,7 +826,7 @@ export default function Rehearsal() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col overflow-x-hidden bg-background">
+    <div className={`flex min-h-screen flex-col overflow-x-hidden bg-background ${highContrast ? 'contrast-125' : ''} ${reduceMotion ? '[&_*]:transition-none [&_*]:animate-none' : ''}`}>
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-2 px-3 py-2 sm:px-5">
           <Button variant="ghost" size="sm" onClick={() => setShowEndDialog(true)}>
@@ -787,12 +837,16 @@ export default function Rehearsal() {
           <div className="min-w-0 text-center">
             <p className="truncate text-sm font-semibold">{presentation?.title}</p>
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
-              <Clock3 className="h-3.5 w-3.5" />
-              <span className={plannedSeconds > 0 && elapsedSeconds > plannedSeconds ? 'font-semibold text-destructive' : ''}>
-                {formatTime(elapsedSeconds)}
-              </span>
-              {plannedSeconds > 0 && (
-                <span>/ {formatTime(plannedSeconds)}</span>
+              {preferences.show_timer !== false && (
+                <>
+                  <Clock3 className="h-3.5 w-3.5" />
+                  <span className={plannedSeconds > 0 && elapsedSeconds > plannedSeconds ? 'font-semibold text-destructive' : ''}>
+                    {formatTime(elapsedSeconds)}
+                  </span>
+                  {plannedSeconds > 0 && (
+                    <span>/ {formatTime(plannedSeconds)}</span>
+                  )}
+                </>
               )}
               {saving && <Save className="h-3.5 w-3.5 animate-pulse" />}
             </div>
@@ -862,7 +916,7 @@ export default function Rehearsal() {
                   {showAdditionalContent ? 'Ocultar conteúdo extra' : 'Mostrar conteúdo extra'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setShowRestartDialog(true)}>
+                <DropdownMenuItem onClick={requestRestart}>
                   <TimerReset className="mr-2 h-4 w-4" />
                   Recomeçar ensaio
                 </DropdownMenuItem>
@@ -875,19 +929,21 @@ export default function Rehearsal() {
           </div>
         </div>
 
-        <div className="mx-auto w-full max-w-6xl px-3 pb-2 sm:px-5">
-          <div className="flex items-center gap-3">
-            <Progress value={progressPercentage} className="h-2 flex-1" />
-            <span className="w-16 text-right text-xs font-medium text-muted-foreground">
-              {completedCount}/{visibleBlocks.length}
-            </span>
+        {preferences.show_progress !== false && (
+          <div className="mx-auto w-full max-w-6xl px-3 pb-2 sm:px-5">
+            <div className="flex items-center gap-3">
+              <Progress value={progressPercentage} className="h-2 flex-1" />
+              <span className="w-16 text-right text-xs font-medium text-muted-foreground">
+                {completedCount}/{visibleBlocks.length}
+              </span>
+            </div>
           </div>
-        </div>
+        )}
       </header>
 
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 py-6 sm:px-6 sm:py-8">
         {currentBlock ? (
-          <div className="mx-auto w-full max-w-3xl space-y-5">
+          <div className={`mx-auto w-full max-w-3xl ${expandedSpacing ? 'space-y-8' : 'space-y-5'} ${leftAlignedText ? 'text-left' : ''}`}>
             <div className="flex flex-wrap items-center gap-2">
               <StatusBadge status={currentStatus} />
               {currentBlock.is_essential && (
@@ -968,7 +1024,7 @@ export default function Rehearsal() {
               <BlockAttachmentsDisplay blockId={currentBlock.id} />
             )}
 
-            {nextBlock && (
+            {preferences.show_next_block !== false && nextBlock && (
               <div className="rounded-2xl border bg-muted/40 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Próximo tópico</p>
                 <p className="mt-1 line-clamp-2 font-medium">{nextBlock.title || '(Sem título)'}</p>
@@ -986,7 +1042,7 @@ export default function Rehearsal() {
 
       <footer className="sticky bottom-0 z-40 border-t bg-background/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-5">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-2">
-          <Button variant="outline" size="icon" onClick={moveToPrevious} disabled={!previousBlock || saving} title="Tópico anterior">
+          <Button variant="outline" size={largeControls ? "lg" : "icon"} onClick={moveToPrevious} disabled={!previousBlock || saving} title="Tópico anterior">
             <ChevronLeft className="h-5 w-5" />
           </Button>
 
@@ -996,7 +1052,7 @@ export default function Rehearsal() {
               Pular
             </Button>
 
-            <Button variant="outline" size="icon" onClick={() => moveToNext({ status: 'skipped' })} disabled={!currentBlock || saving} className="sm:hidden" title="Pular">
+            <Button variant="outline" size={largeControls ? "lg" : "icon"} onClick={() => moveToNext({ status: 'skipped' })} disabled={!currentBlock || saving} className="sm:hidden" title="Pular">
               <SkipForward className="h-4 w-4" />
             </Button>
 
@@ -1023,7 +1079,7 @@ export default function Rehearsal() {
             </Button>
           </div>
 
-          <Button size="icon" onClick={() => moveToNext({ status: currentStatus === 'completed' ? 'completed' : 'pending' })} disabled={!nextBlock || saving} title="Próximo tópico">
+          <Button size={largeControls ? "lg" : "icon"} onClick={advanceUsingPreference} disabled={!nextBlock || saving} title={preferences.auto_mark_completed !== false ? "Concluir e ir ao próximo tópico" : "Ir ao próximo sem concluir"}>
             <ChevronRight className="h-5 w-5" />
           </Button>
         </div>
@@ -1044,7 +1100,7 @@ export default function Rehearsal() {
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
               Continuar ensaio
             </Button>
-            <Button variant="outline" onClick={() => startNewSession({ restart: true })} disabled={saving} className="w-full">
+            <Button variant="outline" onClick={requestRestart} disabled={saving} className="w-full">
               <RefreshCcw className="mr-2 h-4 w-4" />
               Recomeçar
             </Button>
