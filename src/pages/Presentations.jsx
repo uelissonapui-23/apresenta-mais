@@ -20,6 +20,7 @@ import {
   Search,
   SlidersHorizontal,
   Star,
+  Tag as TagIcon,
   Trash2,
   X,
 } from 'lucide-react';
@@ -56,9 +57,40 @@ import {
 } from '@/components/ui/dialog';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import EmptyState from '@/components/shared/EmptyState';
-import PresentationTagManager from '@/components/shared/PresentationTagManager';
 
 const PAGE_LIMIT = 200;
+
+const TAG_COLORS = [
+  '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6',
+  '#EC4899', '#14B8A6', '#F97316', '#6366F1', '#84CC16',
+];
+const DEFAULT_TAG_COLOR = '#3B82F6';
+
+function TagBadge({ tag }) {
+  return (
+    <span
+      className="inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
+      style={{
+        backgroundColor: `${tag.color || DEFAULT_TAG_COLOR}20`,
+        color: tag.color || DEFAULT_TAG_COLOR,
+      }}
+      title={tag.name}
+    >
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: tag.color || DEFAULT_TAG_COLOR }} />
+      <span className="truncate">{tag.name}</span>
+    </span>
+  );
+}
+
+function PresentationTags({ tags = [] }) {
+  if (!tags.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {tags.slice(0, 4).map((tag) => <TagBadge key={tag.id} tag={tag} />)}
+      {tags.length > 4 && <Badge variant="outline" className="h-5 px-1.5 text-[10px]">+{tags.length - 4}</Badge>}
+    </div>
+  );
+}
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'Todas' },
@@ -190,6 +222,7 @@ function PresentationListCard({
   presentation,
   typeName,
   objectiveName,
+  presentationTags,
   activeSession,
   busyAction,
   onFavorite,
@@ -197,6 +230,7 @@ function PresentationListCard({
   onDuplicate,
   onArchive,
   onDelete,
+  onManageTags,
 }) {
   const status = getStatusMeta(presentation.status);
   const progress = clampPercentage(presentation.progress_percentage);
@@ -272,6 +306,7 @@ function PresentationListCard({
                     Objetivo: {objectiveName}
                   </p>
                 )}
+                <PresentationTags tags={presentationTags} />
               </div>
             </div>
           </div>
@@ -370,6 +405,11 @@ function PresentationListCard({
                   </Link>
                 </DropdownMenuItem>
 
+                <DropdownMenuItem onClick={() => onManageTags(presentation)}>
+                  <TagIcon className="mr-2 h-4 w-4" />
+                  Gerenciar etiquetas
+                </DropdownMenuItem>
+
                 <DropdownMenuSeparator />
 
                 <DropdownMenuItem onClick={() => onRename(presentation)}>
@@ -413,6 +453,7 @@ function PresentationGridCard({
   presentation,
   typeName,
   objectiveName,
+  presentationTags,
   activeSession,
   busyAction,
   onFavorite,
@@ -420,6 +461,7 @@ function PresentationGridCard({
   onDuplicate,
   onArchive,
   onDelete,
+  onManageTags,
 }) {
   const status = getStatusMeta(presentation.status);
   const progress = clampPercentage(presentation.progress_percentage);
@@ -500,6 +542,10 @@ function PresentationGridCard({
                     Histórico
                   </Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onManageTags(presentation)}>
+                  <TagIcon className="mr-2 h-4 w-4" />
+                  Gerenciar etiquetas
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => onRename(presentation)}>
                   <Edit3 className="mr-2 h-4 w-4" />
@@ -559,6 +605,7 @@ function PresentationGridCard({
             Objetivo: {objectiveName}
           </p>
         )}
+        <PresentationTags tags={presentationTags} />
 
         <div className="mt-auto pt-5">
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
@@ -615,6 +662,8 @@ export default function Presentations() {
   const [types, setTypes] = useState([]);
   const [objectives, setObjectives] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [tags, setTags] = useState([]);
+  const [presentationTagLinks, setPresentationTagLinks] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -625,6 +674,7 @@ export default function Presentations() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [objectiveFilter, setObjectiveFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState('all');
   const [sortBy, setSortBy] = useState('updated_desc');
   const [viewMode, setViewMode] = useState('list');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -632,6 +682,10 @@ export default function Presentations() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
+  const [tagTarget, setTagTarget] = useState(null);
+  const [showCreateTag, setShowCreateTag] = useState(false);
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagColor, setNewTagColor] = useState(DEFAULT_TAG_COLOR);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!user?.id) {
@@ -644,7 +698,7 @@ export default function Presentations() {
     setLoadError('');
 
     try {
-      const [presentationRows, typeRows, objectiveRows, sessionRows] = await Promise.all([
+      const [presentationRows, typeRows, objectiveRows, sessionRows, tagRows, tagLinkRows] = await Promise.all([
         base44.entities.Presentation.filter(
           { user_id: user.id },
           '-updated_date',
@@ -665,12 +719,17 @@ export default function Presentations() {
           '-created_date',
           PAGE_LIMIT,
         ),
+        base44.entities.Tag.filter({ user_id: user.id }, 'name', PAGE_LIMIT),
+        base44.entities.PresentationTag.filter({}, '-created_date', PAGE_LIMIT),
       ]);
 
       setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
       setTypes(Array.isArray(typeRows) ? typeRows : []);
       setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
       setSessions(Array.isArray(sessionRows) ? sessionRows : []);
+      setTags(Array.isArray(tagRows) ? tagRows : []);
+      const ownedPresentationIds = new Set((presentationRows || []).map((item) => item.id));
+      setPresentationTagLinks((Array.isArray(tagLinkRows) ? tagLinkRows : []).filter((item) => ownedPresentationIds.has(item.presentation_id)));
     } catch (error) {
       console.error('Erro ao carregar apresentações:', error);
       setLoadError('Não foi possível carregar suas apresentações.');
@@ -698,6 +757,23 @@ export default function Presentations() {
     () => Object.fromEntries(objectives.map((item) => [item.id, item.name])),
     [objectives],
   );
+
+  const tagMap = useMemo(
+    () => Object.fromEntries(tags.map((item) => [item.id, item])),
+    [tags],
+  );
+
+  const tagsByPresentation = useMemo(() => {
+    const map = {};
+    presentationTagLinks.forEach((link) => {
+      const tag = tagMap[link.tag_id];
+      if (!tag) return;
+      if (!map[link.presentation_id]) map[link.presentation_id] = [];
+      map[link.presentation_id].push(tag);
+    });
+    Object.values(map).forEach((items) => items.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR')));
+    return map;
+  }, [presentationTagLinks, tagMap]);
 
   const activeSessionMap = useMemo(() => {
     const map = {};
@@ -741,6 +817,13 @@ export default function Presentations() {
 
       if (objectiveFilter !== 'all' && presentation.objective_id !== objectiveFilter) {
         return false;
+      }
+
+      if (tagFilter !== 'all') {
+        const presentationTagIds = presentationTagLinks
+          .filter((link) => link.presentation_id === presentation.id)
+          .map((link) => link.tag_id);
+        if (!presentationTagIds.includes(tagFilter)) return false;
       }
 
       if (normalizedSearch) {
@@ -791,6 +874,8 @@ export default function Presentations() {
     statusFilter,
     typeFilter,
     typeMap,
+    tagFilter,
+    presentationTagLinks,
   ]);
 
   const counts = useMemo(() => {
@@ -813,7 +898,8 @@ export default function Presentations() {
     search
     || statusFilter !== 'all'
     || typeFilter !== 'all'
-    || objectiveFilter !== 'all',
+    || objectiveFilter !== 'all'
+    || tagFilter !== 'all',
   );
 
   const handleRefresh = async () => {
@@ -826,6 +912,7 @@ export default function Presentations() {
     setStatusFilter('all');
     setTypeFilter('all');
     setObjectiveFilter('all');
+    setTagFilter('all');
     setSortBy('updated_desc');
   };
 
@@ -1064,6 +1151,7 @@ export default function Presentations() {
 
       setPresentations((current) => current.filter((item) => item.id !== presentationId));
       setSessions((current) => current.filter((item) => item.presentation_id !== presentationId));
+      setPresentationTagLinks((current) => current.filter((item) => item.presentation_id !== presentationId));
       setDeleteTarget(null);
 
       toast({ title: 'Apresentação excluída definitivamente' });
@@ -1074,6 +1162,68 @@ export default function Presentations() {
         description: 'Tente novamente. Nenhum conteúdo novo foi criado.',
         variant: 'destructive',
       });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleCreateTag = async () => {
+    const name = newTagName.trim();
+    if (!name || !user?.id || busyAction) return;
+    if (tags.some((tag) => normalizeText(tag.name) === normalizeText(name))) {
+      toast({ title: 'Já existe uma etiqueta com esse nome', variant: 'destructive' });
+      return;
+    }
+    setBusyAction({ type: 'tag-create', presentationId: tagTarget?.id });
+    try {
+      const created = await base44.entities.Tag.create({ user_id: user.id, name, color: newTagColor });
+      setTags((current) => [...current, created].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR')));
+      setNewTagName('');
+      setNewTagColor(DEFAULT_TAG_COLOR);
+      setShowCreateTag(false);
+      toast({ title: 'Etiqueta criada' });
+    } catch (error) {
+      console.error('Erro ao criar etiqueta:', error);
+      toast({ title: 'Não foi possível criar a etiqueta', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleToggleTag = async (tagId) => {
+    if (!tagTarget?.id || busyAction) return;
+    const existing = presentationTagLinks.find((link) => link.presentation_id === tagTarget.id && link.tag_id === tagId);
+    setBusyAction({ type: 'tag-toggle', presentationId: tagTarget.id });
+    try {
+      if (existing) {
+        await base44.entities.PresentationTag.delete(existing.id);
+        setPresentationTagLinks((current) => current.filter((link) => link.id !== existing.id));
+      } else {
+        const created = await base44.entities.PresentationTag.create({ presentation_id: tagTarget.id, tag_id: tagId });
+        setPresentationTagLinks((current) => [...current, created]);
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar etiqueta:', error);
+      toast({ title: 'Não foi possível atualizar as etiquetas', variant: 'destructive' });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleDeleteTag = async (tag) => {
+    if (!tag?.id || busyAction) return;
+    setBusyAction({ type: 'tag-delete', presentationId: tagTarget?.id });
+    try {
+      const links = presentationTagLinks.filter((link) => link.tag_id === tag.id);
+      await Promise.allSettled(links.map((link) => base44.entities.PresentationTag.delete(link.id)));
+      await base44.entities.Tag.delete(tag.id);
+      setTags((current) => current.filter((item) => item.id !== tag.id));
+      setPresentationTagLinks((current) => current.filter((link) => link.tag_id !== tag.id));
+      if (tagFilter === tag.id) setTagFilter('all');
+      toast({ title: 'Etiqueta excluída' });
+    } catch (error) {
+      console.error('Erro ao excluir etiqueta:', error);
+      toast({ title: 'Não foi possível excluir a etiqueta', variant: 'destructive' });
     } finally {
       setBusyAction(null);
     }
@@ -1199,7 +1349,7 @@ export default function Presentations() {
           </div>
 
           {showAdvancedFilters && (
-            <div className="grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-3 border-t pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <p className="mb-1.5 text-xs font-medium text-muted-foreground">Tipo</p>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
@@ -1229,6 +1379,21 @@ export default function Presentations() {
                       <SelectItem key={objective.id} value={objective.id}>
                         {objective.name}
                       </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Etiqueta</p>
+                <Select value={tagFilter} onValueChange={setTagFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Todas as etiquetas" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as etiquetas</SelectItem>
+                    {tags.map((tag) => (
+                      <SelectItem key={tag.id} value={tag.id}>{tag.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -1307,6 +1472,7 @@ export default function Presentations() {
               presentation={presentation}
               typeName={typeMap[presentation.presentation_type_id]}
               objectiveName={objectiveMap[presentation.objective_id]}
+              presentationTags={tagsByPresentation[presentation.id] || []}
               activeSession={activeSessionMap[presentation.id]}
               busyAction={busyAction}
               onFavorite={handleFavorite}
@@ -1314,6 +1480,7 @@ export default function Presentations() {
               onDuplicate={handleDuplicate}
               onArchive={handleArchive}
               onDelete={setDeleteTarget}
+              onManageTags={setTagTarget}
             />
           ))}
         </section>
@@ -1325,6 +1492,7 @@ export default function Presentations() {
               presentation={presentation}
               typeName={typeMap[presentation.presentation_type_id]}
               objectiveName={objectiveMap[presentation.objective_id]}
+              presentationTags={tagsByPresentation[presentation.id] || []}
               activeSession={activeSessionMap[presentation.id]}
               busyAction={busyAction}
               onFavorite={handleFavorite}
@@ -1332,6 +1500,7 @@ export default function Presentations() {
               onDuplicate={handleDuplicate}
               onArchive={handleArchive}
               onDelete={setDeleteTarget}
+              onManageTags={setTagTarget}
             />
           ))}
         </section>
