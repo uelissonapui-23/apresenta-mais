@@ -1,12 +1,824 @@
-import React from 'react';
-import AdminCrud from './AdminCrud';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowUp,
+  Brain,
+  CheckCircle2,
+  Eye,
+  GraduationCap,
+  Heart,
+  Lightbulb,
+  Loader2,
+  Megaphone,
+  MessageCircleQuestion,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Search,
+  Sparkles,
+  Target,
+  Trash2,
+  TrendingUp,
+  Users,
+  XCircle,
+} from 'lucide-react';
+
+import { base44 } from '@/api/base44Client';
+import useCurrentUser from '@/hooks/useCurrentUser';
+import { useToast } from '@/components/ui/use-toast';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import ConfirmDialog from '@/components/shared/ConfirmDialog';
+import EmptyState from '@/components/shared/EmptyState';
+
+const DEFAULT_FORM = {
+  name: '',
+  description: '',
+  icon: 'Target',
+  order_index: 0,
+  active: true,
+};
+
+const ICON_OPTIONS = [
+  { value: 'Target', label: 'Objetivo geral', icon: Target },
+  { value: 'GraduationCap', label: 'Ensinar / Treinar', icon: GraduationCap },
+  { value: 'Eye', label: 'Informar / Demonstrar', icon: Eye },
+  { value: 'Megaphone', label: 'Convencer / Comunicar', icon: Megaphone },
+  { value: 'Sparkles', label: 'Inspirar / Motivar', icon: Sparkles },
+  { value: 'Heart', label: 'Evangelizar / Testemunho', icon: Heart },
+  { value: 'TrendingUp', label: 'Vender / Crescer', icon: TrendingUp },
+  { value: 'Lightbulb', label: 'Apresentar ideia', icon: Lightbulb },
+  { value: 'Brain', label: 'Reflexão / Aprendizado', icon: Brain },
+  { value: 'Users', label: 'Discussão / Grupo', icon: Users },
+  { value: 'MessageCircleQuestion', label: 'Perguntas / Interação', icon: MessageCircleQuestion },
+];
+
+function normalizeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function getIconComponent(iconName) {
+  return ICON_OPTIONS.find((item) => item.value === iconName)?.icon || Target;
+}
+
+function AccessDenied() {
+  return (
+    <div className="mx-auto flex min-h-[65vh] max-w-xl items-center px-4 py-10">
+      <Card className="w-full border-destructive/25">
+        <CardContent className="p-8 text-center">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10">
+            <XCircle className="h-7 w-7 text-destructive" />
+          </div>
+          <h1 className="text-xl font-bold">Acesso restrito</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Apenas administradores podem gerenciar os objetivos das apresentações.
+          </p>
+          <Button asChild className="mt-6">
+            <Link to="/">Voltar ao início</Link>
+          </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center px-4">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <Loader2 className="h-9 w-9 animate-spin text-primary" />
+        <p className="text-sm">Carregando objetivos...</p>
+      </div>
+    </div>
+  );
+}
+
+function SummaryCard({ icon: Icon, label, value, description }) {
+  return (
+    <Card className="border-border/70">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {label}
+            </p>
+            <p className="mt-1 text-2xl font-bold">{value}</p>
+            {description && <p className="mt-1 text-xs text-muted-foreground">{description}</p>}
+          </div>
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted">
+            <Icon className="h-5 w-5 text-foreground/70" />
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function ObjectiveCard({
+  objective,
+  presentationCount,
+  templateCount,
+  flowCount,
+  tipCount,
+  busy,
+  onEdit,
+  onToggleActive,
+  onMove,
+  onDelete,
+  canMoveUp,
+  canMoveDown,
+}) {
+  const Icon = getIconComponent(objective.icon);
+
+  return (
+    <Card className={`overflow-hidden border-border/70 ${!objective.active ? 'opacity-70' : ''}`}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <Icon className="h-6 w-6" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <CardTitle className="truncate text-lg">
+                  {objective.name || 'Objetivo sem nome'}
+                </CardTitle>
+                <Badge variant={objective.active ? 'default' : 'secondary'}>
+                  {objective.active ? 'Ativo' : 'Inativo'}
+                </Badge>
+                <Badge variant="outline">
+                  Ordem {normalizeNumber(objective.order_index, 0)}
+                </Badge>
+              </div>
+              <p className="mt-2 line-clamp-3 min-h-10 text-sm text-muted-foreground">
+                {objective.description || 'Sem descrição cadastrada.'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+
+      <CardContent className="space-y-4 pt-0">
+        <div className="grid grid-cols-2 gap-2 rounded-xl border bg-muted/20 p-3 text-center sm:grid-cols-4">
+          <div>
+            <p className="text-lg font-bold">{presentationCount}</p>
+            <p className="text-[11px] text-muted-foreground">Apresentações</p>
+          </div>
+          <div>
+            <p className="text-lg font-bold">{templateCount}</p>
+            <p className="text-[11px] text-muted-foreground">Modelos</p>
+          </div>
+          <div>
+            <p className="text-lg font-bold">{flowCount}</p>
+            <p className="text-[11px] text-muted-foreground">Fluxos</p>
+          </div>
+          <div>
+            <p className="text-lg font-bold">{tipCount}</p>
+            <p className="text-[11px] text-muted-foreground">Dicas</p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => onEdit(objective)} disabled={busy}>
+            <Pencil className="mr-2 h-4 w-4" />
+            Editar
+          </Button>
+
+          <Button type="button" variant="outline" size="sm" onClick={() => onToggleActive(objective)} disabled={busy}>
+            {objective.active ? 'Desativar' : 'Ativar'}
+          </Button>
+
+          <div className="ml-auto flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => onMove(objective, -1)}
+              disabled={busy || !canMoveUp}
+              aria-label={`Mover ${objective.name} para cima`}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={() => onMove(objective, 1)}
+              disabled={busy || !canMoveDown}
+              aria-label={`Mover ${objective.name} para baixo`}
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="text-destructive hover:text-destructive"
+              onClick={() => onDelete(objective)}
+              disabled={busy}
+              aria-label={`Excluir ${objective.name}`}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function AdminObjectives() {
-  return <AdminCrud entityName="PresentationObjective" title="Objetivos" fields={[
-    { key: 'name', label: 'Nome', type: 'text' },
-    { key: 'description', label: 'Descrição', type: 'textarea' },
-    { key: 'icon', label: 'Ícone', type: 'text' },
-    { key: 'order_index', label: 'Ordem', type: 'number', default: 0 },
-    { key: 'active', label: 'Ativo', type: 'boolean', default: true },
-  ]} />;
+  const { toast } = useToast();
+  const { user, profile, loading: userLoading } = useCurrentUser();
+
+  const [objectives, setObjectives] = useState([]);
+  const [presentations, setPresentations] = useState([]);
+  const [templates, setTemplates] = useState([]);
+  const [flows, setFlows] = useState([]);
+  const [tips, setTips] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [busyId, setBusyId] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingObjective, setEditingObjective] = useState(null);
+  const [form, setForm] = useState(DEFAULT_FORM);
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const isAdmin = profile?.role === 'admin';
+
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (!user?.id || !isAdmin) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    if (!silent) setLoading(true);
+
+    try {
+      const [objectiveRows, presentationRows, templateRows, flowRows, tipRows] = await Promise.all([
+        base44.entities.PresentationObjective.list('order_index'),
+        base44.entities.Presentation.list('-updated_date'),
+        base44.entities.PresentationTemplate.list('name'),
+        base44.entities.GuidedFlow.list('name'),
+        base44.entities.AppTip.list('-created_date'),
+      ]);
+
+      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
+      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
+      setTemplates(Array.isArray(templateRows) ? templateRows : []);
+      setFlows(Array.isArray(flowRows) ? flowRows : []);
+      setTips(Array.isArray(tipRows) ? tipRows : []);
+    } catch (error) {
+      console.error('Erro ao carregar objetivos:', error);
+      toast({
+        title: 'Não foi possível carregar os objetivos',
+        description: 'Confira sua conexão e tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [isAdmin, toast, user?.id]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const sortedObjectives = useMemo(
+    () => [...objectives].sort((a, b) => {
+      const orderDifference = normalizeNumber(a.order_index, 0) - normalizeNumber(b.order_index, 0);
+      if (orderDifference !== 0) return orderDifference;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR');
+    }),
+    [objectives],
+  );
+
+  const filteredObjectives = useMemo(() => {
+    const term = search.trim().toLowerCase();
+
+    return sortedObjectives.filter((objective) => {
+      if (statusFilter === 'active' && !objective.active) return false;
+      if (statusFilter === 'inactive' && objective.active) return false;
+      if (!term) return true;
+
+      return [objective.name, objective.description, objective.icon]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(term));
+    });
+  }, [search, sortedObjectives, statusFilter]);
+
+  const createCountMap = useCallback((rows, field) => {
+    const map = {};
+    rows.forEach((item) => {
+      const id = item?.[field];
+      if (!id) return;
+      map[id] = (map[id] || 0) + 1;
+    });
+    return map;
+  }, []);
+
+  const presentationCountMap = useMemo(
+    () => createCountMap(presentations, 'objective_id'),
+    [createCountMap, presentations],
+  );
+  const templateCountMap = useMemo(
+    () => createCountMap(templates, 'objective_id'),
+    [createCountMap, templates],
+  );
+  const flowCountMap = useMemo(
+    () => createCountMap(flows, 'objective_id'),
+    [createCountMap, flows],
+  );
+  const tipCountMap = useMemo(
+    () => createCountMap(tips, 'objective_id'),
+    [createCountMap, tips],
+  );
+
+  const activeCount = objectives.filter((objective) => objective.active).length;
+  const usedCount = objectives.filter((objective) => (
+    (presentationCountMap[objective.id] || 0)
+    + (templateCountMap[objective.id] || 0)
+    + (flowCountMap[objective.id] || 0)
+    + (tipCountMap[objective.id] || 0)
+  ) > 0).length;
+
+  const openCreateDialog = () => {
+    const nextOrder = sortedObjectives.length
+      ? Math.max(...sortedObjectives.map((item) => normalizeNumber(item.order_index, 0))) + 1
+      : 1;
+
+    setEditingObjective(null);
+    setForm({ ...DEFAULT_FORM, order_index: nextOrder });
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (objective) => {
+    setEditingObjective(objective);
+    setForm({
+      name: objective.name || '',
+      description: objective.description || '',
+      icon: objective.icon || 'Target',
+      order_index: normalizeNumber(objective.order_index, 0),
+      active: objective.active !== false,
+    });
+    setDialogOpen(true);
+  };
+
+  const updateForm = (key, value) => {
+    setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleSave = async () => {
+    const name = form.name.trim();
+    const description = form.description.trim();
+
+    if (!name) {
+      toast({
+        title: 'Informe o nome do objetivo',
+        description: 'O nome é obrigatório.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const duplicate = objectives.some(
+      (item) => item.id !== editingObjective?.id
+        && String(item.name || '').trim().toLowerCase() === name.toLowerCase(),
+    );
+
+    if (duplicate) {
+      toast({
+        title: 'Nome já utilizado',
+        description: 'Já existe um objetivo com esse nome.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const payload = {
+      name,
+      description,
+      icon: form.icon || 'Target',
+      order_index: normalizeNumber(form.order_index, 0),
+      active: !!form.active,
+    };
+
+    setSaving(true);
+
+    try {
+      if (editingObjective?.id) {
+        const updated = await base44.entities.PresentationObjective.update(editingObjective.id, payload);
+        setObjectives((current) => current.map((item) => (
+          item.id === editingObjective.id ? { ...item, ...payload, ...(updated || {}) } : item
+        )));
+        toast({ title: 'Objetivo atualizado', description: 'As alterações foram salvas.' });
+      } else {
+        const created = await base44.entities.PresentationObjective.create(payload);
+        setObjectives((current) => [...current, created]);
+        toast({ title: 'Objetivo criado', description: 'Ele já pode ser usado no aplicativo.' });
+      }
+
+      setDialogOpen(false);
+      setEditingObjective(null);
+      setForm(DEFAULT_FORM);
+    } catch (error) {
+      console.error('Erro ao salvar objetivo:', error);
+      toast({
+        title: 'Não foi possível salvar',
+        description: 'Tente novamente em alguns instantes.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleActive = async (objective) => {
+    const nextValue = !objective.active;
+    setBusyId(objective.id);
+
+    try {
+      await base44.entities.PresentationObjective.update(objective.id, { active: nextValue });
+      setObjectives((current) => current.map((item) => (
+        item.id === objective.id ? { ...item, active: nextValue } : item
+      )));
+      toast({
+        title: nextValue ? 'Objetivo ativado' : 'Objetivo desativado',
+        description: nextValue
+          ? 'Ele voltou a aparecer nas opções de criação.'
+          : 'Apresentações existentes continuam preservadas.',
+      });
+    } catch (error) {
+      console.error('Erro ao alterar status:', error);
+      toast({
+        title: 'Não foi possível alterar o status',
+        description: 'Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const handleMove = async (objective, direction) => {
+    const currentIndex = sortedObjectives.findIndex((item) => item.id === objective.id);
+    const targetIndex = currentIndex + direction;
+    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedObjectives.length) return;
+
+    const target = sortedObjectives[targetIndex];
+    const currentOrder = normalizeNumber(objective.order_index, currentIndex + 1);
+    const targetOrder = normalizeNumber(target.order_index, targetIndex + 1);
+
+    setBusyId(objective.id);
+
+    try {
+      await Promise.all([
+        base44.entities.PresentationObjective.update(objective.id, { order_index: targetOrder }),
+        base44.entities.PresentationObjective.update(target.id, { order_index: currentOrder }),
+      ]);
+
+      setObjectives((current) => current.map((item) => {
+        if (item.id === objective.id) return { ...item, order_index: targetOrder };
+        if (item.id === target.id) return { ...item, order_index: currentOrder };
+        return item;
+      }));
+    } catch (error) {
+      console.error('Erro ao reordenar objetivo:', error);
+      toast({
+        title: 'Não foi possível alterar a ordem',
+        description: 'Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const requestDelete = (objective) => {
+    const presentationCount = presentationCountMap[objective.id] || 0;
+    const templateCount = templateCountMap[objective.id] || 0;
+    const flowCount = flowCountMap[objective.id] || 0;
+    const tipCount = tipCountMap[objective.id] || 0;
+
+    if (presentationCount + templateCount + flowCount + tipCount > 0) {
+      toast({
+        title: 'Objetivo em uso',
+        description: `Ele está vinculado a ${presentationCount} apresentação(ões), ${templateCount} modelo(s), ${flowCount} fluxo(s) e ${tipCount} dica(s). Desative-o em vez de excluir.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setDeleteTarget(objective);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget?.id) return;
+
+    const targetId = deleteTarget.id;
+    setBusyId(targetId);
+
+    try {
+      await base44.entities.PresentationObjective.delete(targetId);
+      setObjectives((current) => current.filter((item) => item.id !== targetId));
+      setDeleteTarget(null);
+      toast({ title: 'Objetivo excluído', description: 'O registro foi removido definitivamente.' });
+    } catch (error) {
+      console.error('Erro ao excluir objetivo:', error);
+      toast({
+        title: 'Não foi possível excluir',
+        description: 'Confirme se o objetivo ainda possui algum vínculo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setBusyId('');
+    }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadData({ silent: true });
+  };
+
+  if (userLoading || loading) return <LoadingState />;
+  if (!isAdmin) return <AccessDenied />;
+
+  return (
+    <div className="mx-auto w-full max-w-7xl space-y-6 overflow-x-hidden px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2">
+            <Link to="/admin">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Administração
+            </Link>
+          </Button>
+          <p className="text-sm font-medium text-primary">Configuração da criação</p>
+          <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Objetivos da apresentação</h1>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground sm:text-base">
+            Defina o resultado que o usuário deseja alcançar. O objetivo orienta perguntas, modelos, dicas e a estrutura sugerida.
+          </p>
+        </div>
+
+        <div className="flex w-full gap-2 sm:w-auto">
+          <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="flex-1 sm:flex-none">
+            <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+          <Button onClick={openCreateDialog} className="flex-1 sm:flex-none">
+            <Plus className="mr-2 h-4 w-4" />
+            Novo objetivo
+          </Button>
+        </div>
+      </header>
+
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <SummaryCard icon={Target} label="Objetivos" value={objectives.length} description="Total cadastrado" />
+        <SummaryCard icon={CheckCircle2} label="Ativos" value={activeCount} description="Disponíveis na criação" />
+        <SummaryCard icon={TrendingUp} label="Em uso" value={usedCount} description="Com algum vínculo" />
+        <SummaryCard icon={Sparkles} label="Fluxos vinculados" value={flows.length} description="Orientações guiadas" />
+      </section>
+
+      <Card className="border-border/70">
+        <CardContent className="p-4">
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Buscar por nome, descrição ou ícone..."
+                className="pl-9"
+              />
+            </div>
+
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Filtrar status" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos os status</SelectItem>
+                <SelectItem value="active">Somente ativos</SelectItem>
+                <SelectItem value="inactive">Somente inativos</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {filteredObjectives.length === 0 ? (
+        <Card className="border-dashed">
+          <EmptyState
+            icon={Target}
+            title={objectives.length === 0 ? 'Nenhum objetivo cadastrado' : 'Nenhum objetivo encontrado'}
+            description={
+              objectives.length === 0
+                ? 'Cadastre objetivos como Ensinar, Inspirar, Convencer e Gerar reflexão.'
+                : 'Altere os filtros ou o texto pesquisado.'
+            }
+            actionLabel={objectives.length === 0 ? 'Criar primeiro objetivo' : undefined}
+            onAction={objectives.length === 0 ? openCreateDialog : undefined}
+          />
+        </Card>
+      ) : (
+        <section className="grid gap-4 lg:grid-cols-2">
+          {filteredObjectives.map((objective) => {
+            const globalIndex = sortedObjectives.findIndex((item) => item.id === objective.id);
+            return (
+              <ObjectiveCard
+                key={objective.id}
+                objective={objective}
+                presentationCount={presentationCountMap[objective.id] || 0}
+                templateCount={templateCountMap[objective.id] || 0}
+                flowCount={flowCountMap[objective.id] || 0}
+                tipCount={tipCountMap[objective.id] || 0}
+                busy={busyId === objective.id}
+                onEdit={openEditDialog}
+                onToggleActive={handleToggleActive}
+                onMove={handleMove}
+                onDelete={requestDelete}
+                canMoveUp={globalIndex > 0}
+                canMoveDown={globalIndex >= 0 && globalIndex < sortedObjectives.length - 1}
+              />
+            );
+          })}
+        </section>
+      )}
+
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-5">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+              <Lightbulb className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="font-semibold">Por que o objetivo é importante?</h2>
+              <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                Uma apresentação criada para ensinar precisa de uma estrutura diferente de uma apresentação criada para convencer, inspirar ou vender. O objetivo ajuda o aplicativo a orientar o usuário desde a primeira pergunta até a conclusão.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={dialogOpen} onOpenChange={(open) => !saving && setDialogOpen(open)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{editingObjective ? 'Editar objetivo' : 'Novo objetivo'}</DialogTitle>
+            <DialogDescription>
+              Informe qual resultado este objetivo representa e como ele deve aparecer para o usuário.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-5 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="objective-name">Nome *</Label>
+              <Input
+                id="objective-name"
+                value={form.name}
+                onChange={(event) => updateForm('name', event.target.value)}
+                placeholder="Ex.: Ensinar"
+                maxLength={80}
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="objective-description">Descrição</Label>
+              <Textarea
+                id="objective-description"
+                value={form.description}
+                onChange={(event) => updateForm('description', event.target.value)}
+                placeholder="Ex.: Fazer o público compreender e lembrar um conteúdo com clareza."
+                rows={4}
+                maxLength={500}
+              />
+              <p className="text-right text-xs text-muted-foreground">{form.description.length}/500</p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Ícone</Label>
+                <Select value={form.icon} onValueChange={(value) => updateForm('icon', value)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Escolha um ícone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ICON_OPTIONS.map((option) => {
+                      const OptionIcon = option.icon;
+                      return (
+                        <SelectItem key={option.value} value={option.value}>
+                          <span className="flex items-center gap-2">
+                            <OptionIcon className="h-4 w-4" />
+                            {option.label}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="objective-order">Ordem</Label>
+                <Input
+                  id="objective-order"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.order_index}
+                  onChange={(event) => updateForm('order_index', event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-xl border p-4">
+              <div>
+                <Label htmlFor="objective-active" className="font-semibold">Objetivo ativo</Label>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Quando desativado, deixa de aparecer para novas apresentações.
+                </p>
+              </div>
+              <Switch
+                id="objective-active"
+                checked={!!form.active}
+                onCheckedChange={(checked) => updateForm('active', checked)}
+              />
+            </div>
+
+            <div className="rounded-xl border bg-muted/20 p-4">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Prévia</p>
+              <div className="mt-3 flex items-center gap-3">
+                {(() => {
+                  const PreviewIcon = getIconComponent(form.icon);
+                  return (
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                      <PreviewIcon className="h-6 w-6" />
+                    </div>
+                  );
+                })()}
+                <div className="min-w-0">
+                  <p className="font-semibold">{form.name.trim() || 'Nome do objetivo'}</p>
+                  <p className="line-clamp-2 text-sm text-muted-foreground">
+                    {form.description.trim() || 'Descrição do resultado que o usuário deseja alcançar.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={handleSave} disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {editingObjective ? 'Salvar alterações' : 'Criar objetivo'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        title="Excluir objetivo?"
+        description={
+          deleteTarget
+            ? `O objetivo “${deleteTarget.name || 'sem nome'}” será removido definitivamente. A exclusão só será permitida se ele não estiver vinculado a apresentações, modelos, fluxos guiados ou dicas.`
+            : ''
+        }
+        confirmLabel="Excluir definitivamente"
+        onConfirm={handleDelete}
+        variant="destructive"
+      />
+    </div>
+  );
 }
