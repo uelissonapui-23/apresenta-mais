@@ -1,37 +1,64 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+
 import {
+  Link,
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
+
+import {
+  Bell,
   BookOpen,
+  ChevronLeft,
   ChevronRight,
+  CircleUserRound,
+  FolderOpen,
   Home,
   LayoutDashboard,
   LayoutTemplate,
+  Library,
   LogOut,
   Menu,
+  Moon,
   MoreHorizontal,
-  PanelLeft,
+  Palette,
   PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Presentation,
   Settings,
-  Shield,
+  ShieldCheck,
   Sparkles,
-  User,
+  Sun,
+  UserRound,
   X,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
+
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet';
 import {
   Tooltip,
@@ -39,187 +66,289 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useToast } from '@/components/ui/use-toast';
 
 const SIDEBAR_STORAGE_KEY = 'apresenta_sidebar_collapsed';
+const THEME_STORAGE_KEY = 'apresenta_theme';
 
-const MAIN_NAVIGATION = [
+const MAIN_NAV_ITEMS = [
   {
-    path: '/',
     label: 'Início',
-    description: 'Visão geral e acessos rápidos',
+    path: '/',
     icon: Home,
     exact: true,
   },
   {
-    path: '/presentations',
     label: 'Apresentações',
-    description: 'Organize e acompanhe seus conteúdos',
+    path: '/presentations',
     icon: Presentation,
   },
   {
-    path: '/new-presentation',
-    label: 'Criar',
-    description: 'Comece uma nova apresentação',
-    icon: Plus,
-    highlighted: true,
-  },
-  {
-    path: '/templates',
     label: 'Modelos',
-    description: 'Estruturas prontas para começar',
+    path: '/templates',
     icon: LayoutTemplate,
   },
   {
-    path: '/library',
     label: 'Biblioteca',
-    description: 'Conteúdos reutilizáveis',
-    icon: BookOpen,
+    path: '/library',
+    icon: Library,
   },
   {
-    path: '/themes',
     label: 'Temas',
-    description: 'Aparência das apresentações',
-    icon: Sparkles,
+    path: '/themes',
+    icon: Palette,
   },
 ];
 
-const ACCOUNT_NAVIGATION = [
+const SECONDARY_NAV_ITEMS = [
   {
-    path: '/profile',
     label: 'Perfil',
-    description: 'Seus dados e seu plano',
-    icon: User,
+    path: '/profile',
+    icon: UserRound,
   },
   {
-    path: '/settings',
     label: 'Configurações',
-    description: 'Preferências e acessibilidade',
+    path: '/settings',
     icon: Settings,
   },
 ];
 
-const MOBILE_PRIMARY = [
-  MAIN_NAVIGATION[0],
-  MAIN_NAVIGATION[1],
-  MAIN_NAVIGATION[2],
-  MAIN_NAVIGATION[3],
+const ADMIN_NAV_ITEMS = [
+  {
+    label: 'Painel administrativo',
+    path: '/admin',
+    icon: LayoutDashboard,
+    exact: true,
+  },
+  {
+    label: 'Usuários',
+    path: '/admin/users',
+    icon: CircleUserRound,
+  },
+  {
+    label: 'Planos',
+    path: '/admin/plans',
+    icon: ShieldCheck,
+  },
+  {
+    label: 'Tipos',
+    path: '/admin/types',
+    icon: FolderOpen,
+  },
+  {
+    label: 'Objetivos',
+    path: '/admin/objectives',
+    icon: Sparkles,
+  },
+  {
+    label: 'Estilos',
+    path: '/admin/styles',
+    icon: Palette,
+  },
+  {
+    label: 'Tipos de bloco',
+    path: '/admin/block-types',
+    icon: BookOpen,
+  },
+  {
+    label: 'Modelos',
+    path: '/admin/templates',
+    icon: LayoutTemplate,
+  },
+  {
+    label: 'Fluxos guiados',
+    path: '/admin/guided-flows',
+    icon: Presentation,
+  },
+  {
+    label: 'Perguntas',
+    path: '/admin/guided-questions',
+    icon: BookOpen,
+  },
+  {
+    label: 'Temas',
+    path: '/admin/themes',
+    icon: Palette,
+  },
+  {
+    label: 'Dicas',
+    path: '/admin/tips',
+    icon: Sparkles,
+  },
 ];
 
-function getInitials(name) {
-  const safeName = String(name || '').trim();
+function getInitials(value) {
+  const text = String(value || '').trim();
 
-  if (!safeName) {
-    return 'AP';
+  if (!text) {
+    return 'U';
   }
 
-  return safeName
+  const parts = text
     .split(/\s+/)
     .filter(Boolean)
-    .slice(0, 2)
+    .slice(0, 2);
+
+  return parts
     .map((part) => part.charAt(0).toUpperCase())
     .join('');
 }
 
-function isRouteActive(locationPath, item) {
-  if (item.exact) {
-    return locationPath === item.path;
-  }
-
+function isAdminProfile(profile) {
   return (
-    locationPath === item.path
-    || locationPath.startsWith(`${item.path}/`)
+    profile?.role === 'admin'
+    && profile?.active !== false
   );
 }
 
 function getPageTitle(pathname) {
-  const exactTitles = {
-    '/': 'Início',
-    '/presentations': 'Apresentações',
-    '/new-presentation': 'Nova apresentação',
-    '/templates': 'Modelos',
-    '/library': 'Biblioteca',
-    '/themes': 'Temas',
-    '/settings': 'Configurações',
-    '/profile': 'Perfil',
-    '/admin': 'Administração',
-  };
-
-  if (exactTitles[pathname]) {
-    return exactTitles[pathname];
+  if (pathname === '/') {
+    return 'Início';
   }
 
-  if (pathname.includes('/editor')) {
-    return 'Editor';
+  if (pathname === '/presentations') {
+    return 'Minhas apresentações';
   }
 
-  if (pathname.includes('/overview')) {
-    return 'Visão geral';
+  if (pathname === '/new-presentation') {
+    return 'Nova apresentação';
   }
 
   if (pathname.startsWith('/guided/')) {
     return 'Criação guiada';
   }
 
+  if (
+    pathname.includes('/editor')
+    || pathname.startsWith('/presentation-editor/')
+  ) {
+    return 'Editor';
+  }
+
+  if (
+    pathname.includes('/overview')
+    || pathname.startsWith('/presentation-overview/')
+  ) {
+    return 'Visão geral';
+  }
+
   if (pathname.startsWith('/session-history/')) {
     return 'Histórico';
   }
 
-  if (pathname.startsWith('/admin/')) {
+  if (pathname === '/templates') {
+    return 'Modelos';
+  }
+
+  if (pathname === '/library') {
+    return 'Biblioteca';
+  }
+
+  if (pathname === '/themes') {
+    return 'Temas';
+  }
+
+  if (pathname === '/settings') {
+    return 'Configurações';
+  }
+
+  if (pathname === '/profile') {
+    return 'Perfil';
+  }
+
+  if (pathname === '/admin') {
     return 'Administração';
+  }
+
+  if (pathname.startsWith('/admin/users')) {
+    return 'Usuários';
+  }
+
+  if (pathname.startsWith('/admin/plans')) {
+    return 'Planos';
+  }
+
+  if (pathname.startsWith('/admin/types')) {
+    return 'Tipos de apresentação';
+  }
+
+  if (pathname.startsWith('/admin/objectives')) {
+    return 'Objetivos';
+  }
+
+  if (pathname.startsWith('/admin/styles')) {
+    return 'Estilos';
+  }
+
+  if (pathname.startsWith('/admin/block-types')) {
+    return 'Tipos de bloco';
+  }
+
+  if (pathname.startsWith('/admin/templates')) {
+    return 'Modelos administrativos';
+  }
+
+  if (pathname.startsWith('/admin/guided-flows')) {
+    return 'Fluxos guiados';
+  }
+
+  if (pathname.startsWith('/admin/guided-questions')) {
+    return 'Perguntas guiadas';
+  }
+
+  if (pathname.startsWith('/admin/themes')) {
+    return 'Temas administrativos';
+  }
+
+  if (pathname.startsWith('/admin/tips')) {
+    return 'Dicas';
   }
 
   return 'Apresenta+';
 }
 
-function NavigationItem({
+function NavItem({
   item,
-  collapsed,
-  pathname,
+  collapsed = false,
   onNavigate,
 }) {
-  const active = isRouteActive(pathname, item);
   const Icon = item.icon;
 
-  const link = (
-    <Link
+  const content = (
+    <NavLink
       to={item.path}
+      end={item.exact}
       onClick={onNavigate}
-      aria-current={active ? 'page' : undefined}
-      className={[
-        'group relative flex min-h-11 items-center rounded-xl transition-all',
-        collapsed ? 'justify-center px-2' : 'gap-3 px-3',
-        active
-          ? 'bg-primary text-primary-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-        item.highlighted && !active
-          ? 'border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10'
-          : '',
-      ].join(' ')}
+      className={({ isActive }) => (
+        [
+          'group flex min-h-11 items-center rounded-xl transition-colors',
+          collapsed
+            ? 'justify-center px-2'
+            : 'gap-3 px-3',
+          isActive
+            ? 'bg-primary text-primary-foreground shadow-sm'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+        ].join(' ')
+      )}
     >
       <Icon className="h-5 w-5 shrink-0" />
 
       {!collapsed && (
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">
-            {item.label}
-          </p>
-        </div>
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+          {item.label}
+        </span>
       )}
-
-      {!collapsed && active && (
-        <ChevronRight className="h-4 w-4 shrink-0 opacity-80" />
-      )}
-    </Link>
+    </NavLink>
   );
 
   if (!collapsed) {
-    return link;
+    return content;
   }
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {link}
+        {content}
       </TooltipTrigger>
 
       <TooltipContent side="right">
@@ -229,390 +358,590 @@ function NavigationItem({
   );
 }
 
-function DesktopSidebar({
+function Sidebar({
+  profile,
+  user,
   collapsed,
-  onToggleCollapsed,
-  pathname,
-  isAdmin,
-  displayName,
-  avatarUrl,
+  onToggle,
   onLogout,
+  loggingOut,
 }) {
+  const admin = isAdminProfile(profile);
+
+  const displayName = (
+    profile?.name
+    || user?.full_name
+    || user?.name
+    || user?.email
+    || 'Usuário'
+  );
+
   return (
-    <TooltipProvider delayDuration={150}>
-      <aside
+    <aside
+      className={[
+        'fixed inset-y-0 left-0 z-40 hidden border-r bg-background lg:flex lg:flex-col',
+        'transition-[width] duration-200',
+        collapsed ? 'w-[76px]' : 'w-64',
+      ].join(' ')}
+    >
+      <div
         className={[
-          'fixed inset-y-0 left-0 z-40 hidden flex-col border-r bg-background/95 backdrop-blur md:flex',
-          'transition-[width] duration-200 ease-out',
-          collapsed ? 'w-[72px]' : 'w-64',
+          'flex h-16 items-center border-b px-3',
+          collapsed
+            ? 'justify-center'
+            : 'justify-between',
         ].join(' ')}
       >
-        <div
-          className={[
-            'flex h-16 shrink-0 items-center border-b px-3',
-            collapsed ? 'justify-center' : 'justify-between gap-3',
-          ].join(' ')}
+        <Link
+          to="/"
+          className="flex min-w-0 items-center gap-3"
         >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
+            <Presentation className="h-5 w-5" />
+          </div>
+
           {!collapsed && (
-            <Link to="/" className="flex min-w-0 items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-                <Presentation className="h-5 w-5" />
-              </div>
+            <div className="min-w-0">
+              <p className="truncate text-base font-bold">
+                Apresenta+
+              </p>
 
-              <div className="min-w-0">
-                <p className="truncate text-base font-bold leading-none">
-                  Apresenta+
-                </p>
-                <p className="mt-1 truncate text-[11px] text-muted-foreground">
-                  Organize. Ensaie. Apresente.
-                </p>
-              </div>
-            </Link>
+              <p className="truncate text-[11px] text-muted-foreground">
+                Organize. Ensaie. Apresente.
+              </p>
+            </div>
           )}
+        </Link>
 
+        {!collapsed && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            onClick={onToggleCollapsed}
-            aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'}
-            className="h-9 w-9 shrink-0"
+            onClick={onToggle}
+            aria-label="Recolher menu"
           >
-            {collapsed ? (
-              <PanelLeft className="h-4 w-4" />
-            ) : (
-              <PanelLeftClose className="h-4 w-4" />
-            )}
+            <PanelLeftClose className="h-5 w-5" />
           </Button>
-        </div>
+        )}
 
-        <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-4">
-          {!collapsed && (
-            <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Principal
-            </p>
-          )}
+        {collapsed && (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="absolute -right-3 top-20 flex h-7 w-7 items-center justify-center rounded-full border bg-background shadow-sm hover:bg-muted"
+            aria-label="Expandir menu"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        )}
+      </div>
 
+      <TooltipProvider delayDuration={150}>
+        <nav className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 py-4">
           <div className="space-y-1">
-            {MAIN_NAVIGATION.map((item) => (
-              <NavigationItem
+            {MAIN_NAV_ITEMS.map((item) => (
+              <NavItem
                 key={item.path}
                 item={item}
                 collapsed={collapsed}
-                pathname={pathname}
               />
             ))}
           </div>
 
-          {isAdmin && (
-            <div className="mt-5 border-t pt-4">
+          <div className="my-4 border-t" />
+
+          <div className="space-y-1">
+            {SECONDARY_NAV_ITEMS.map((item) => (
+              <NavItem
+                key={item.path}
+                item={item}
+                collapsed={collapsed}
+              />
+            ))}
+          </div>
+
+          {admin && (
+            <>
+              <div className="my-4 border-t" />
+
               {!collapsed && (
                 <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Gestão
+                  Administração
                 </p>
               )}
 
-              <NavigationItem
-                item={{
-                  path: '/admin',
-                  label: 'Administração',
-                  description: 'Configurações globais do aplicativo',
-                  icon: Shield,
-                }}
-                collapsed={collapsed}
-                pathname={pathname}
-              />
-            </div>
+              <div className="space-y-1">
+                {ADMIN_NAV_ITEMS.map((item) => (
+                  <NavItem
+                    key={item.path}
+                    item={item}
+                    collapsed={collapsed}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </nav>
+      </TooltipProvider>
 
-        <div className="shrink-0 border-t p-2">
-          <div className="space-y-1">
-            {ACCOUNT_NAVIGATION.map((item) => (
-              <NavigationItem
-                key={item.path}
-                item={item}
-                collapsed={collapsed}
-                pathname={pathname}
-              />
-            ))}
-          </div>
-
-          <div
-            className={[
-              'mt-2 rounded-xl border bg-muted/30 p-2',
-              collapsed ? 'flex justify-center' : '',
-            ].join(' ')}
-          >
-            {collapsed ? (
+      <div className="border-t p-3">
+        {collapsed ? (
+          <TooltipProvider delayDuration={150}>
+            <DropdownMenu>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Link to="/profile">
-                    <Avatar className="h-9 w-9">
-                      <AvatarImage src={avatarUrl || undefined} alt={displayName} />
-                      <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
-                    </Avatar>
-                  </Link>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="h-12 w-full p-0"
+                    >
+                      <Avatar className="h-9 w-9">
+                        <AvatarImage
+                          src={profile?.avatar_url || ''}
+                          alt={displayName}
+                        />
+
+                        <AvatarFallback>
+                          {getInitials(displayName)}
+                        </AvatarFallback>
+                      </Avatar>
+                    </Button>
+                  </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <TooltipContent side="right">{displayName}</TooltipContent>
+
+                <TooltipContent side="right">
+                  {displayName}
+                </TooltipContent>
               </Tooltip>
-            ) : (
-              <div className="flex min-w-0 items-center gap-2.5">
-                <Link to="/profile" className="shrink-0">
-                  <Avatar className="h-9 w-9">
-                    <AvatarImage src={avatarUrl || undefined} alt={displayName} />
-                    <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
-                  </Avatar>
-                </Link>
+
+              <UserDropdownContent
+                profile={profile}
+                user={user}
+                onLogout={onLogout}
+                loggingOut={loggingOut}
+              />
+            </DropdownMenu>
+          </TooltipProvider>
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="flex w-full min-w-0 items-center gap-3 rounded-xl p-2 text-left hover:bg-muted"
+              >
+                <Avatar className="h-10 w-10 shrink-0">
+                  <AvatarImage
+                    src={profile?.avatar_url || ''}
+                    alt={displayName}
+                  />
+
+                  <AvatarFallback>
+                    {getInitials(displayName)}
+                  </AvatarFallback>
+                </Avatar>
 
                 <div className="min-w-0 flex-1">
-                  <Link to="/profile" className="block truncate text-sm font-medium hover:underline">
-                    {displayName}
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-semibold">
+                      {displayName}
+                    </p>
+
+                    {admin && (
+                      <Badge
+                        variant="secondary"
+                        className="h-5 px-1.5 text-[9px]"
+                      >
+                        Admin
+                      </Badge>
+                    )}
+                  </div>
+
                   <p className="truncate text-xs text-muted-foreground">
-                    {isAdmin ? 'Administrador' : 'Usuário'}
+                    {user?.email || 'Conta Apresenta+'}
                   </p>
                 </div>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={onLogout}
-                  aria-label="Sair da conta"
-                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                >
-                  <LogOut className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
-          </div>
-        </div>
-      </aside>
-    </TooltipProvider>
+                <MoreHorizontal className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </button>
+            </DropdownMenuTrigger>
+
+            <UserDropdownContent
+              profile={profile}
+              user={user}
+              onLogout={onLogout}
+              loggingOut={loggingOut}
+            />
+          </DropdownMenu>
+        )}
+      </div>
+    </aside>
   );
 }
 
-function MobileTopBar({ title, onOpenMenu }) {
+function UserDropdownContent({
+  profile,
+  user,
+  onLogout,
+  loggingOut,
+}) {
+  const displayName = (
+    profile?.name
+    || user?.full_name
+    || user?.name
+    || 'Usuário'
+  );
+
   return (
-    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur md:hidden">
-      <div className="flex min-w-0 items-center gap-2.5">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-          <Presentation className="h-4 w-4" />
+    <DropdownMenuContent
+      align="end"
+      sideOffset={8}
+      className="w-64"
+    >
+      <DropdownMenuLabel>
+        <div className="min-w-0">
+          <p className="truncate font-semibold">
+            {displayName}
+          </p>
+
+          <p className="truncate text-xs font-normal text-muted-foreground">
+            {user?.email}
+          </p>
         </div>
+      </DropdownMenuLabel>
+
+      <DropdownMenuSeparator />
+
+      <DropdownMenuItem asChild>
+        <Link to="/profile">
+          <UserRound className="mr-2 h-4 w-4" />
+          Perfil
+        </Link>
+      </DropdownMenuItem>
+
+      <DropdownMenuItem asChild>
+        <Link to="/settings">
+          <Settings className="mr-2 h-4 w-4" />
+          Configurações
+        </Link>
+      </DropdownMenuItem>
+
+      <DropdownMenuSeparator />
+
+      <DropdownMenuItem
+        onClick={onLogout}
+        disabled={loggingOut}
+        className="text-destructive focus:text-destructive"
+      >
+        <LogOut className="mr-2 h-4 w-4" />
+        {loggingOut ? 'Saindo...' : 'Sair da conta'}
+      </DropdownMenuItem>
+    </DropdownMenuContent>
+  );
+}
+
+function MobileHeader({
+  title,
+  profile,
+  user,
+  onOpenMenu,
+  onLogout,
+  loggingOut,
+}) {
+  const displayName = (
+    profile?.name
+    || user?.full_name
+    || user?.name
+    || 'Usuário'
+  );
+
+  return (
+    <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur lg:hidden">
+      <div className="flex min-w-0 items-center gap-3">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={onOpenMenu}
+          aria-label="Abrir menu"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
 
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">
             {title}
           </p>
-          <p className="truncate text-[10px] text-muted-foreground">
-            Apresenta+
-          </p>
         </div>
       </div>
 
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        onClick={onOpenMenu}
-        aria-label="Abrir menu"
-        className="h-9 w-9"
-      >
-        <Menu className="h-5 w-5" />
-      </Button>
+      <div className="flex items-center gap-1">
+        <Button
+          asChild
+          variant="ghost"
+          size="icon"
+          aria-label="Criar apresentação"
+        >
+          <Link to="/new-presentation">
+            <Plus className="h-5 w-5" />
+          </Link>
+        </Button>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="rounded-full"
+            >
+              <Avatar className="h-8 w-8">
+                <AvatarImage
+                  src={profile?.avatar_url || ''}
+                  alt={displayName}
+                />
+
+                <AvatarFallback className="text-xs">
+                  {getInitials(displayName)}
+                </AvatarFallback>
+              </Avatar>
+            </Button>
+          </DropdownMenuTrigger>
+
+          <UserDropdownContent
+            profile={profile}
+            user={user}
+            onLogout={onLogout}
+            loggingOut={loggingOut}
+          />
+        </DropdownMenu>
+      </div>
     </header>
   );
 }
 
-function MobileBottomNavigation({ pathname, onOpenMore }) {
+function MobileDrawer({
+  open,
+  onOpenChange,
+  profile,
+}) {
+  const admin = isAdminProfile(profile);
+
+  const handleNavigate = () => {
+    onOpenChange(false);
+  };
+
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden">
-      <div className="mx-auto grid h-16 max-w-lg grid-cols-5 px-1">
-        {MOBILE_PRIMARY.map((item) => {
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+    >
+      <SheetContent
+        side="left"
+        className="w-[88vw] max-w-sm overflow-y-auto p-0"
+      >
+        <SheetHeader className="border-b p-4 text-left">
+          <SheetTitle className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+              <Presentation className="h-5 w-5" />
+            </span>
+
+            <span>
+              Apresenta+
+            </span>
+          </SheetTitle>
+        </SheetHeader>
+
+        <nav className="space-y-5 p-4">
+          <div className="space-y-1">
+            {MAIN_NAV_ITEMS.map((item) => (
+              <NavItem
+                key={item.path}
+                item={item}
+                onNavigate={handleNavigate}
+              />
+            ))}
+          </div>
+
+          <div className="border-t pt-4">
+            <div className="space-y-1">
+              {SECONDARY_NAV_ITEMS.map((item) => (
+                <NavItem
+                  key={item.path}
+                  item={item}
+                  onNavigate={handleNavigate}
+                />
+              ))}
+            </div>
+          </div>
+
+          {admin && (
+            <div className="border-t pt-4">
+              <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                Administração
+              </p>
+
+              <div className="space-y-1">
+                {ADMIN_NAV_ITEMS.map((item) => (
+                  <NavItem
+                    key={item.path}
+                    item={item}
+                    onNavigate={handleNavigate}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </nav>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function MobileBottomNavigation({
+  onOpenMore,
+}) {
+  const items = [
+    {
+      label: 'Início',
+      path: '/',
+      icon: Home,
+      exact: true,
+    },
+    {
+      label: 'Apresentações',
+      path: '/presentations',
+      icon: Presentation,
+    },
+    {
+      label: 'Criar',
+      path: '/new-presentation',
+      icon: Plus,
+      primary: true,
+    },
+    {
+      label: 'Modelos',
+      path: '/templates',
+      icon: LayoutTemplate,
+    },
+  ];
+
+  return (
+    <nav
+      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden"
+      aria-label="Navegação principal"
+    >
+      <div className="mx-auto grid max-w-lg grid-cols-5 items-end">
+        {items.map((item) => {
           const Icon = item.icon;
-          const active = isRouteActive(pathname, item);
+
+          if (item.primary) {
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className="flex flex-col items-center justify-end gap-1"
+              >
+                <span className="-mt-7 flex h-14 w-14 items-center justify-center rounded-full border-4 border-background bg-primary text-primary-foreground shadow-lg">
+                  <Icon className="h-6 w-6" />
+                </span>
+
+                <span className="text-[10px] font-medium">
+                  {item.label}
+                </span>
+              </Link>
+            );
+          }
 
           return (
-            <Link
+            <NavLink
               key={item.path}
               to={item.path}
-              aria-current={active ? 'page' : undefined}
-              className={[
-                'relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-medium transition-colors',
-                active ? 'text-primary' : 'text-muted-foreground',
-              ].join(' ')}
-            >
-              {item.highlighted ? (
-                <span
-                  className={[
-                    'flex h-9 w-9 items-center justify-center rounded-full shadow-sm',
-                    active
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-primary text-primary-foreground',
-                  ].join(' ')}
-                >
-                  <Icon className="h-5 w-5" />
-                </span>
-              ) : (
-                <Icon className="h-5 w-5" />
+              end={item.exact}
+              className={({ isActive }) => (
+                [
+                  'flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-1',
+                  isActive
+                    ? 'text-primary'
+                    : 'text-muted-foreground',
+                ].join(' ')
               )}
+            >
+              <Icon className="h-5 w-5" />
 
-              <span className="max-w-full truncate">
+              <span className="max-w-full truncate text-[10px] font-medium">
                 {item.label}
               </span>
-            </Link>
+            </NavLink>
           );
         })}
 
         <button
           type="button"
           onClick={onOpenMore}
-          className="flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1 text-[10px] font-medium text-muted-foreground"
+          className="flex min-h-12 flex-col items-center justify-center gap-1 rounded-xl px-1 text-muted-foreground"
         >
           <MoreHorizontal className="h-5 w-5" />
-          <span>Mais</span>
+
+          <span className="text-[10px] font-medium">
+            Mais
+          </span>
         </button>
       </div>
     </nav>
   );
 }
 
-function MobileMenu({
-  open,
-  onOpenChange,
-  pathname,
-  isAdmin,
-  displayName,
-  avatarUrl,
-  onLogout,
-}) {
-  const closeMenu = () => onOpenChange(false);
-
+function LayoutLoading() {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-[min(90vw,360px)] p-0">
-        <SheetHeader className="border-b p-5 text-left">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-11 w-11">
-              <AvatarImage src={avatarUrl || undefined} alt={displayName} />
-              <AvatarFallback>{getInitials(displayName)}</AvatarFallback>
-            </Avatar>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <div className="h-9 w-9 animate-spin rounded-full border-4 border-muted border-t-primary" />
 
-            <div className="min-w-0 flex-1">
-              <SheetTitle className="truncate text-base">
-                {displayName}
-              </SheetTitle>
-              <SheetDescription>
-                {isAdmin ? 'Administrador' : 'Sua conta'}
-              </SheetDescription>
-            </div>
-          </div>
-        </SheetHeader>
-
-        <div className="max-h-[calc(100dvh-96px)] overflow-y-auto p-4">
-          <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Menu
-          </p>
-
-          <div className="space-y-1">
-            {[
-              ...MAIN_NAVIGATION,
-              ...ACCOUNT_NAVIGATION,
-            ].map((item) => (
-              <NavigationItem
-                key={item.path}
-                item={item}
-                collapsed={false}
-                pathname={pathname}
-                onNavigate={closeMenu}
-              />
-            ))}
-          </div>
-
-          {isAdmin && (
-            <div className="mt-5 border-t pt-4">
-              <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Gestão
-              </p>
-
-              <NavigationItem
-                item={{
-                  path: '/admin',
-                  label: 'Administração',
-                  description: 'Configurações globais',
-                  icon: Shield,
-                }}
-                collapsed={false}
-                pathname={pathname}
-                onNavigate={closeMenu}
-              />
-            </div>
-          )}
-
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onLogout}
-            className="mt-6 w-full justify-start text-destructive hover:text-destructive"
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Sair da conta
-          </Button>
-        </div>
-      </SheetContent>
-    </Sheet>
+        <p className="text-sm">
+          Preparando o aplicativo...
+        </p>
+      </div>
+    </div>
   );
 }
 
-export default function Layout({ children }) {
+export default function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { toast } = useToast();
+
   const {
     user,
     profile,
-    isAdmin,
     loading,
   } = useCurrentUser();
-
-  const [collapsed, setCollapsed] = useState(() => {
-    try {
-      return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const displayName = useMemo(
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => (
-      profile?.name
-      || user?.full_name
-      || user?.name
-      || 'Apresentador'
+      window.localStorage.getItem(
+        SIDEBAR_STORAGE_KEY,
+      ) === 'true'
     ),
-    [profile?.name, user?.full_name, user?.name],
   );
 
-  const avatarUrl = profile?.avatar_url || user?.avatar_url || '';
-  const pageTitle = getPageTitle(location.pathname);
+  const pageTitle = useMemo(
+    () => getPageTitle(location.pathname),
+    [location.pathname],
+  );
 
   useEffect(() => {
     setMobileMenuOpen(false);
   }, [location.pathname]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(
-        SIDEBAR_STORAGE_KEY,
-        collapsed ? 'true' : 'false',
-      );
-    } catch {
-      // O layout continua funcionando quando o armazenamento local não está disponível.
-    }
-  }, [collapsed]);
+    window.localStorage.setItem(
+      SIDEBAR_STORAGE_KEY,
+      String(sidebarCollapsed),
+    );
+  }, [sidebarCollapsed]);
 
   const handleLogout = async () => {
     if (loggingOut) {
@@ -623,86 +952,75 @@ export default function Layout({ children }) {
 
     try {
       await base44.auth.logout();
-      navigate('/login', { replace: true });
-    } catch (error) {
-      console.error('Erro ao sair da conta:', error);
 
-      try {
-        await base44.auth.logout('/login');
-      } catch {
-        navigate('/login', { replace: true });
-      }
+      navigate('/login', {
+        replace: true,
+      });
+    } catch (error) {
+      console.error(
+        'Erro ao sair da conta:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível sair',
+        description: 'Tente novamente em alguns instantes.',
+        variant: 'destructive',
+      });
     } finally {
       setLoggingOut(false);
-      setMobileMenuOpen(false);
     }
   };
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background px-4">
-        <div className="flex flex-col items-center gap-3 text-muted-foreground">
-          <div className="h-9 w-9 animate-spin rounded-full border-4 border-muted border-t-primary" />
-          <p className="text-sm">Carregando o aplicativo...</p>
-        </div>
-      </div>
-    );
+    return <LayoutLoading />;
   }
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-muted/20 text-foreground">
-      <DesktopSidebar
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((current) => !current)}
-        pathname={location.pathname}
-        isAdmin={Boolean(isAdmin)}
-        displayName={displayName}
-        avatarUrl={avatarUrl}
+    <div className="min-h-screen overflow-x-hidden bg-muted/20">
+      <Sidebar
+        profile={profile}
+        user={user}
+        collapsed={sidebarCollapsed}
+        onToggle={() => {
+          setSidebarCollapsed((current) => !current);
+        }}
         onLogout={handleLogout}
+        loggingOut={loggingOut}
       />
 
-      <MobileTopBar
+      <MobileHeader
         title={pageTitle}
+        profile={profile}
+        user={user}
         onOpenMenu={() => setMobileMenuOpen(true)}
+        onLogout={handleLogout}
+        loggingOut={loggingOut}
+      />
+
+      <MobileDrawer
+        open={mobileMenuOpen}
+        onOpenChange={setMobileMenuOpen}
+        profile={profile}
       />
 
       <main
         className={[
-          'min-h-screen min-w-0 transition-[margin] duration-200 ease-out',
-          'pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-0',
-          collapsed ? 'md:ml-[72px]' : 'md:ml-64',
+          'min-h-screen min-w-0 transition-[padding] duration-200',
+          'pb-24 lg:pb-0',
+          sidebarCollapsed
+            ? 'lg:pl-[76px]'
+            : 'lg:pl-64',
         ].join(' ')}
       >
         <div className="min-w-0">
-          {children || <Outlet />}
+          <Outlet />
         </div>
       </main>
 
       <MobileBottomNavigation
-        pathname={location.pathname}
         onOpenMore={() => setMobileMenuOpen(true)}
       />
-
-      <MobileMenu
-        open={mobileMenuOpen}
-        onOpenChange={setMobileMenuOpen}
-        pathname={location.pathname}
-        isAdmin={Boolean(isAdmin)}
-        displayName={displayName}
-        avatarUrl={avatarUrl}
-        onLogout={handleLogout}
-      />
-
-      {loggingOut && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 backdrop-blur-sm">
-          <div className="rounded-2xl border bg-background p-5 shadow-xl">
-            <div className="flex items-center gap-3">
-              <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
-              <p className="text-sm font-medium">Saindo da conta...</p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
