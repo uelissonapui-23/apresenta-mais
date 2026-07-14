@@ -7,14 +7,28 @@ import {
   ChevronRight,
   FileText,
   Loader2,
+  RotateCcw,
   Save,
   Sparkles,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
@@ -27,6 +41,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+
+const FALLBACK_PREFIX = 'fallback-';
+const FALLBACK_STORAGE_PREFIX = 'apresenta-guided-draft:';
 
 const FALLBACK_QUESTIONS = [
   {
@@ -68,12 +85,22 @@ const FALLBACK_QUESTIONS = [
     split_lines: true,
   },
   {
+    id: 'fallback-examples',
+    question_text: 'Existe alguma história, exemplo ou ilustração importante?',
+    help_text: 'Esta parte é opcional e poderá ser reposicionada no editor.',
+    field_type: 'textarea',
+    required: false,
+    order_index: 5,
+    block_type_to_generate: 'example',
+    generated_title: 'Exemplo ou ilustração',
+  },
+  {
     id: 'fallback-application',
     question_text: 'Qual aplicação prática você deseja propor?',
     help_text: 'O que o público poderá pensar, decidir ou fazer depois?',
     field_type: 'textarea',
     required: false,
-    order_index: 5,
+    order_index: 6,
     block_type_to_generate: 'application',
     generated_title: 'Aplicação',
   },
@@ -83,46 +110,154 @@ const FALLBACK_QUESTIONS = [
     help_text: 'Resuma a mensagem e defina a forma de encerramento.',
     field_type: 'textarea',
     required: false,
-    order_index: 6,
+    order_index: 7,
     block_type_to_generate: 'conclusion',
     generated_title: 'Conclusão',
   },
 ];
 
+function safeJson(value, fallback = null) {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'object') return value;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeText(value) {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeCode(value) {
+  return normalizeText(value)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
 function normalizeOptions(rawOptions) {
   if (!rawOptions) return [];
 
   if (Array.isArray(rawOptions)) {
-    return rawOptions.map((option) => {
-      if (typeof option === 'string') {
-        return { label: option, value: option };
-      }
+    return rawOptions
+      .map((option) => {
+        if (typeof option === 'string') {
+          return { label: option, value: option };
+        }
 
-      return {
-        label: option.label || option.name || option.value,
-        value: String(option.value ?? option.id ?? option.label ?? option.name),
-      };
-    });
+        return {
+          label: option.label || option.name || option.value,
+          value: String(option.value ?? option.id ?? option.label ?? option.name),
+        };
+      })
+      .filter((option) => option.label && option.value);
   }
 
-  try {
-    const parsed = typeof rawOptions === 'string'
-      ? JSON.parse(rawOptions)
-      : rawOptions;
+  const parsed = safeJson(rawOptions);
+  if (parsed) return normalizeOptions(parsed);
 
-    return normalizeOptions(parsed);
-  } catch {
-    return String(rawOptions)
-      .split(/\r?\n|,/)
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .map((item) => ({ label: item, value: item }));
-  }
+  return String(rawOptions)
+    .split(/\r?\n|,/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => ({ label: item, value: item }));
 }
 
 function hasAnswer(value) {
   if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'boolean') return true;
   return String(value ?? '').trim().length > 0;
+}
+
+function compareCondition(actual, operator, expected) {
+  const normalizedOperator = normalizeCode(operator || 'equals');
+
+  if (normalizedOperator === 'exists') return hasAnswer(actual);
+  if (normalizedOperator === 'not_exists') return !hasAnswer(actual);
+
+  if (Array.isArray(actual)) {
+    if (normalizedOperator === 'contains') return actual.map(String).includes(String(expected));
+    if (normalizedOperator === 'not_contains') return !actual.map(String).includes(String(expected));
+  }
+
+  const actualText = normalizeText(actual);
+  const expectedText = normalizeText(expected);
+
+  switch (normalizedOperator) {
+    case 'not_equals':
+    case 'different':
+      return actualText !== expectedText;
+    case 'contains':
+      return actualText.includes(expectedText);
+    case 'not_contains':
+      return !actualText.includes(expectedText);
+    case 'greater_than':
+      return Number(actual) > Number(expected);
+    case 'less_than':
+      return Number(actual) < Number(expected);
+    case 'equals':
+    default:
+      return actualText === expectedText;
+  }
+}
+
+function evaluateRule(ruleValue, answers) {
+  const rule = safeJson(ruleValue, ruleValue);
+  if (!rule || typeof rule !== 'object') return true;
+
+  if (Array.isArray(rule.all)) {
+    return rule.all.every((item) => evaluateRule(item, answers));
+  }
+
+  if (Array.isArray(rule.any)) {
+    return rule.any.some((item) => evaluateRule(item, answers));
+  }
+
+  const questionId = rule.question_id || rule.questionId || rule.field || rule.depends_on;
+  if (!questionId) return true;
+
+  return compareCondition(
+    answers[questionId],
+    rule.operator || (Object.prototype.hasOwnProperty.call(rule, 'equals') ? 'equals' : 'equals'),
+    Object.prototype.hasOwnProperty.call(rule, 'value') ? rule.value : rule.equals,
+  );
+}
+
+function scoreFlow(flow, presentation) {
+  let score = Number(flow.version || 0) / 1000;
+
+  const checks = [
+    ['presentation_type_id', 100],
+    ['objective_id', 20],
+    ['communication_style_id', 5],
+  ];
+
+  for (const [field, weight] of checks) {
+    const flowValue = flow[field];
+    const presentationValue = presentation[field];
+
+    if (flowValue && presentationValue && flowValue !== presentationValue) {
+      return -1;
+    }
+
+    if (flowValue && flowValue === presentationValue) score += weight;
+    if (!flowValue) score += 0.1;
+  }
+
+  return score;
+}
+
+function selectBestFlow(flows, presentation) {
+  return [...(flows || [])]
+    .map((flow) => ({ flow, score: scoreFlow(flow, presentation) }))
+    .filter((item) => item.score >= 0)
+    .sort((a, b) => b.score - a.score)[0]?.flow || null;
 }
 
 function LoadingState() {
@@ -137,11 +272,11 @@ function LoadingState() {
 }
 
 function QuestionField({ question, value, onChange }) {
-  const fieldType = String(question.field_type || 'textarea').toLowerCase();
+  const fieldType = normalizeCode(question.field_type || 'textarea');
   const options = normalizeOptions(question.options_json);
   const commonPlaceholder = question.placeholder || 'Digite sua resposta...';
 
-  if (fieldType === 'select') {
+  if (fieldType === 'select' || fieldType === 'single_select') {
     return (
       <Select value={String(value || '')} onValueChange={onChange}>
         <SelectTrigger className="min-h-11 w-full">
@@ -171,13 +306,62 @@ function QuestionField({ question, value, onChange }) {
             htmlFor={`${question.id}-${option.value}`}
             className="flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors hover:bg-muted/50"
           >
-            <RadioGroupItem
-              id={`${question.id}-${option.value}`}
-              value={option.value}
-            />
+            <RadioGroupItem id={`${question.id}-${option.value}`} value={option.value} />
             <span className="font-normal">{option.label}</span>
           </Label>
         ))}
+      </RadioGroup>
+    );
+  }
+
+  if (fieldType === 'multi_select' || fieldType === 'multiselect' || fieldType === 'checkboxes') {
+    const selected = Array.isArray(value) ? value.map(String) : [];
+
+    return (
+      <div className="grid gap-3">
+        {options.map((option) => {
+          const checked = selected.includes(option.value);
+
+          return (
+            <Label
+              key={option.value}
+              htmlFor={`${question.id}-${option.value}`}
+              className="flex cursor-pointer items-center gap-3 rounded-xl border p-4 transition-colors hover:bg-muted/50"
+            >
+              <Checkbox
+                id={`${question.id}-${option.value}`}
+                checked={checked}
+                onCheckedChange={(nextChecked) => {
+                  onChange(
+                    nextChecked
+                      ? [...selected, option.value]
+                      : selected.filter((item) => item !== option.value),
+                  );
+                }}
+              />
+              <span className="font-normal">{option.label}</span>
+            </Label>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (fieldType === 'boolean' || fieldType === 'yes_no') {
+    return (
+      <RadioGroup
+        value={value === true ? 'true' : value === false ? 'false' : ''}
+        onValueChange={(nextValue) => onChange(nextValue === 'true')}
+        className="grid gap-3 sm:grid-cols-2"
+      >
+        <Label className="flex cursor-pointer items-center gap-3 rounded-xl border p-4 hover:bg-muted/50">
+          <RadioGroupItem value="true" />
+          <span className="font-normal">Sim</span>
+        </Label>
+        <Label className="flex cursor-pointer items-center gap-3 rounded-xl border p-4 hover:bg-muted/50">
+          <RadioGroupItem value="false" />
+          <span className="font-normal">Não</span>
+        </Label>
       </RadioGroup>
     );
   }
@@ -223,6 +407,7 @@ export default function GuidedCreation() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, loading: userLoading } = useCurrentUser();
 
   const [presentation, setPresentation] = useState(null);
   const [flow, setFlow] = useState(null);
@@ -234,9 +419,18 @@ export default function GuidedCreation() {
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
+  const [replaceDialogOpen, setReplaceDialogOpen] = useState(false);
+
+  const storageKey = `${FALLBACK_STORAGE_PREFIX}${id}`;
 
   const loadPage = useCallback(async () => {
-    if (!id) return;
+    if (!id || userLoading) return;
+
+    if (!user?.id) {
+      setError('Sua sessão não está disponível. Entre novamente para continuar.');
+      setLoading(false);
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -244,43 +438,21 @@ export default function GuidedCreation() {
     try {
       const presentationData = await base44.entities.Presentation.get(id);
 
-      if (!presentationData) {
-        throw new Error('Apresentação não encontrada.');
+      if (!presentationData || presentationData.user_id !== user.id) {
+        throw new Error('Apresentação não encontrada ou sem permissão de acesso.');
       }
 
       setPresentation(presentationData);
 
-      const flows = await base44.entities.GuidedFlow.filter(
-        {
-          presentation_type_id: presentationData.presentation_type_id,
-          active: true,
-        },
+      const allActiveFlows = await base44.entities.GuidedFlow.filter(
+        { active: true },
         '-version',
       );
-
-      let selectedFlow = flows?.[0] || null;
-
-      if (selectedFlow && presentationData.objective_id) {
-        const exactObjectiveFlow = flows.find(
-          (item) => item.objective_id === presentationData.objective_id,
-        );
-        if (exactObjectiveFlow) selectedFlow = exactObjectiveFlow;
-      }
-
-      if (selectedFlow && presentationData.communication_style_id) {
-        const exactStyleFlow = flows.find(
-          (item) => (
-            item.communication_style_id === presentationData.communication_style_id
-            && (!item.objective_id || item.objective_id === presentationData.objective_id)
-          ),
-        );
-        if (exactStyleFlow) selectedFlow = exactStyleFlow;
-      }
-
+      const selectedFlow = selectBestFlow(allActiveFlows, presentationData);
       setFlow(selectedFlow);
 
       let questionRows = [];
-      if (selectedFlow) {
+      if (selectedFlow?.id) {
         questionRows = await base44.entities.GuidedQuestion.filter(
           { guided_flow_id: selectedFlow.id, active: true },
           'order_index',
@@ -290,50 +462,71 @@ export default function GuidedCreation() {
       const effectiveQuestions = questionRows?.length
         ? questionRows
         : FALLBACK_QUESTIONS;
-
       setQuestions(effectiveQuestions);
 
-      const existingAnswers = await base44.entities.GuidedAnswer.filter({
-        presentation_id: id,
-      });
+      const usingFallback = !questionRows?.length;
+      const existingAnswers = usingFallback
+        ? []
+        : await base44.entities.GuidedAnswer.filter({ presentation_id: id });
 
       setSavedAnswers(existingAnswers || []);
 
       const answerMap = {};
       (existingAnswers || []).forEach((item) => {
-        answerMap[item.guided_question_id] = item.answer_text ?? item.answer_json ?? '';
+        const jsonValue = safeJson(item.answer_json);
+        answerMap[item.guided_question_id] = jsonValue ?? item.answer_text ?? '';
       });
+
+      if (usingFallback) {
+        const localDraft = safeJson(window.localStorage.getItem(storageKey), {});
+        Object.assign(answerMap, localDraft || {});
+      }
 
       effectiveQuestions.forEach((question) => {
         if (answerMap[question.id] !== undefined) return;
-
-        if (question.destination_field && presentationData[question.destination_field]) {
+        if (question.destination_field && presentationData[question.destination_field] !== undefined) {
           answerMap[question.id] = presentationData[question.destination_field];
         }
       });
 
       setAnswers(answerMap);
+      setCurrentStep(0);
     } catch (pageError) {
       console.error('Erro ao carregar criação guiada:', pageError);
       setError(pageError.message || 'Não foi possível abrir a criação guiada.');
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, storageKey, user?.id, userLoading]);
 
   useEffect(() => {
     loadPage();
   }, [loadPage]);
 
-  const currentQuestion = questions[currentStep];
-  const isLastStep = currentStep === questions.length - 1;
-  const progress = questions.length
-    ? Math.round(((currentStep + 1) / questions.length) * 100)
+  const visibleQuestions = useMemo(
+    () => questions.filter((question) => evaluateRule(question.conditional_rule_json, answers)),
+    [answers, questions],
+  );
+
+  useEffect(() => {
+    if (visibleQuestions.length === 0) {
+      setCurrentStep(0);
+      return;
+    }
+    if (currentStep > visibleQuestions.length - 1) {
+      setCurrentStep(visibleQuestions.length - 1);
+    }
+  }, [currentStep, visibleQuestions.length]);
+
+  const currentQuestion = visibleQuestions[currentStep];
+  const isLastStep = currentStep === visibleQuestions.length - 1;
+  const progress = visibleQuestions.length
+    ? Math.round(((currentStep + 1) / visibleQuestions.length) * 100)
     : 0;
 
   const answeredCount = useMemo(
-    () => questions.filter((question) => hasAnswer(answers[question.id])).length,
-    [answers, questions],
+    () => visibleQuestions.filter((question) => hasAnswer(answers[question.id])).length,
+    [answers, visibleQuestions],
   );
 
   const updateAnswer = (questionId, value) => {
@@ -346,7 +539,7 @@ export default function GuidedCreation() {
     if (!hasAnswer(answers[currentQuestion.id])) {
       toast({
         title: 'Resposta necessária',
-        description: 'Responda esta pergunta antes de continuar ou use a opção de pular somente em perguntas opcionais.',
+        description: 'Responda esta pergunta antes de continuar.',
         variant: 'destructive',
       });
       return false;
@@ -356,29 +549,39 @@ export default function GuidedCreation() {
   };
 
   const saveAnswers = async ({ showToast = false } = {}) => {
-    if (!id) return;
+    if (!id || !presentation) return;
 
     setSaving(true);
 
     try {
+      const realQuestions = questions.filter(
+        (question) => !String(question.id).startsWith(FALLBACK_PREFIX),
+      );
       const existingByQuestion = Object.fromEntries(
         savedAnswers.map((item) => [item.guided_question_id, item]),
       );
-
       const storedRows = [...savedAnswers];
 
-      for (const question of questions) {
+      for (const question of realQuestions) {
         const value = answers[question.id];
-        if (!hasAnswer(value)) continue;
+        const existing = existingByQuestion[question.id];
+
+        if (!hasAnswer(value)) {
+          if (existing?.id) {
+            await base44.entities.GuidedAnswer.delete(existing.id);
+            const index = storedRows.findIndex((item) => item.id === existing.id);
+            if (index >= 0) storedRows.splice(index, 1);
+          }
+          continue;
+        }
 
         const payload = {
           presentation_id: id,
           guided_question_id: question.id,
           answer_text: Array.isArray(value) ? value.join('\n') : String(value),
-          answer_json: Array.isArray(value) ? value : null,
+          answer_json: Array.isArray(value) || typeof value === 'boolean' ? value : null,
         };
 
-        const existing = existingByQuestion[question.id];
         if (existing?.id) {
           const updated = await base44.entities.GuidedAnswer.update(existing.id, payload);
           const index = storedRows.findIndex((item) => item.id === existing.id);
@@ -389,11 +592,28 @@ export default function GuidedCreation() {
         }
       }
 
+      const fallbackDraft = {};
+      questions
+        .filter((question) => String(question.id).startsWith(FALLBACK_PREFIX))
+        .forEach((question) => {
+          if (hasAnswer(answers[question.id])) fallbackDraft[question.id] = answers[question.id];
+        });
+
+      if (Object.keys(fallbackDraft).length > 0) {
+        window.localStorage.setItem(storageKey, JSON.stringify(fallbackDraft));
+      }
+
       const presentationUpdates = {};
       questions.forEach((question) => {
         const value = answers[question.id];
-        if (question.destination_field && hasAnswer(value)) {
-          presentationUpdates[question.destination_field] = value;
+        if (!question.destination_field || !hasAnswer(value)) return;
+
+        if (question.destination_field === 'estimated_duration_minutes') {
+          presentationUpdates[question.destination_field] = Number(value) || 0;
+        } else {
+          presentationUpdates[question.destination_field] = Array.isArray(value)
+            ? value.join(', ')
+            : value;
         }
       });
 
@@ -403,10 +623,7 @@ export default function GuidedCreation() {
       }
 
       setSavedAnswers(storedRows);
-
-      if (showToast) {
-        toast({ title: 'Rascunho salvo' });
-      }
+      if (showToast) toast({ title: 'Rascunho salvo' });
     } catch (saveError) {
       console.error('Erro ao salvar respostas:', saveError);
       toast({
@@ -421,42 +638,41 @@ export default function GuidedCreation() {
   };
 
   const buildBlocks = (blockTypes) => {
-    const typeByCode = Object.fromEntries(
-      blockTypes.map((item) => [String(item.code || '').toLowerCase(), item]),
-    );
+    const typeByCode = {};
+    blockTypes.forEach((item) => {
+      typeByCode[normalizeCode(item.code)] = item;
+      typeByCode[normalizeCode(item.name)] = item;
+    });
 
-    const defaultType = typeByCode.topic || typeByCode.section || blockTypes[0];
+    const defaultType = typeByCode.topic || typeByCode.topico || typeByCode.section || blockTypes[0];
     const blocks = [];
     let orderIndex = 0;
 
-    questions.forEach((question) => {
+    visibleQuestions.forEach((question) => {
       const rawValue = answers[question.id];
       if (!hasAnswer(rawValue) || !question.block_type_to_generate) return;
 
-      const code = String(question.block_type_to_generate).toLowerCase();
-      const blockType = typeByCode[code] || defaultType;
+      const requestedCode = normalizeCode(question.block_type_to_generate);
+      const blockType = typeByCode[requestedCode] || defaultType;
       if (!blockType) return;
 
       const stringValue = Array.isArray(rawValue)
         ? rawValue.join('\n')
         : String(rawValue).trim();
 
-      const shouldSplitLines = question.split_lines
-        || code === 'topic'
-        || code === 'subtopic';
-
+      const shouldSplitLines = Boolean(question.split_lines)
+        || ['topic', 'topico', 'subtopic', 'subtopico'].includes(requestedCode);
       const lines = shouldSplitLines
         ? stringValue.split(/\r?\n/).map((item) => item.trim()).filter(Boolean)
         : [stringValue];
 
-      lines.forEach((line, lineIndex) => {
+      lines.forEach((line) => {
         const generatedTitle = question.generated_title
-          || (lines.length > 1 ? line : question.question_short_title)
-          || (code === 'conclusion' ? 'Conclusão' : null)
-          || (code === 'application' ? 'Aplicação' : null)
-          || (code === 'section' ? question.question_text : null)
+          || question.question_short_title
+          || (requestedCode === 'conclusion' ? 'Conclusão' : null)
+          || (requestedCode === 'application' || requestedCode === 'aplicacao' ? 'Aplicação' : null)
+          || (requestedCode === 'section' || requestedCode === 'secao' ? question.question_text : null)
           || line;
-
         const titleUsesLine = shouldSplitLines || lines.length > 1;
 
         blocks.push({
@@ -465,7 +681,7 @@ export default function GuidedCreation() {
           block_type_id: blockType.id,
           title: titleUsesLine ? line : generatedTitle,
           summary: '',
-          content: titleUsesLine && lineIndex >= 0 ? '' : line,
+          content: titleUsesLine ? '' : line,
           additional_content: '',
           presenter_notes: '',
           order_index: orderIndex,
@@ -481,19 +697,15 @@ export default function GuidedCreation() {
           text_style: '',
         });
 
-        if (!titleUsesLine) {
-          blocks[blocks.length - 1].content = line;
-        }
-
         orderIndex += 1;
       });
     });
 
-    if (blocks.length === 0) {
+    if (blocks.length === 0 && defaultType?.id) {
       blocks.push({
         presentation_id: id,
         parent_id: null,
-        block_type_id: defaultType?.id,
+        block_type_id: defaultType.id,
         title: presentation?.main_theme || presentation?.title || 'Primeiro tópico',
         summary: presentation?.main_message || '',
         content: '',
@@ -516,8 +728,59 @@ export default function GuidedCreation() {
     return blocks;
   };
 
+  const createGeneratedBlocks = async ({ replaceExisting = false } = {}) => {
+    setGenerating(true);
+
+    try {
+      await saveAnswers();
+
+      const existingBlocks = await base44.entities.PresentationBlock.filter({ presentation_id: id });
+      if (existingBlocks?.length > 0 && !replaceExisting) {
+        setReplaceDialogOpen(true);
+        return;
+      }
+
+      if (replaceExisting && existingBlocks?.length > 0) {
+        for (const block of existingBlocks) {
+          await base44.entities.PresentationBlock.delete(block.id);
+        }
+      }
+
+      const blockTypes = await base44.entities.BlockType.filter({ active: true }, 'order_index');
+      const blocks = buildBlocks(blockTypes || []);
+
+      if (!blocks.length) {
+        throw new Error('Nenhum tipo de bloco ativo foi encontrado.');
+      }
+
+      await base44.entities.PresentationBlock.bulkCreate(blocks);
+      await base44.entities.Presentation.update(id, {
+        status: 'draft',
+        progress_percentage: 0,
+        last_opened_at: new Date().toISOString(),
+      });
+
+      window.localStorage.removeItem(storageKey);
+
+      toast({
+        title: replaceExisting ? 'Estrutura recriada' : 'Estrutura criada',
+        description: `${blocks.length} bloco${blocks.length === 1 ? '' : 's'} foram enviados ao editor.`,
+      });
+      navigate(`/presentations/${id}/editor`);
+    } catch (generateError) {
+      console.error('Erro ao gerar estrutura:', generateError);
+      toast({
+        title: 'Não foi possível gerar a estrutura',
+        description: generateError.message || 'Revise as respostas e tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const handleGenerate = async () => {
-    const firstMissingRequired = questions.findIndex(
+    const firstMissingRequired = visibleQuestions.findIndex(
       (question) => question.required && !hasAnswer(answers[question.id]),
     );
 
@@ -531,67 +794,19 @@ export default function GuidedCreation() {
       return;
     }
 
-    setGenerating(true);
-
-    try {
-      await saveAnswers();
-
-      const existingBlocks = await base44.entities.PresentationBlock.filter({
-        presentation_id: id,
-      });
-
-      if (existingBlocks?.length > 0) {
-        toast({
-          title: 'Estrutura já existente',
-          description: 'As respostas foram salvas. Abrimos o editor sem duplicar seus tópicos.',
-        });
-        navigate(`/presentations/${id}/editor`);
-        return;
-      }
-
-      const blockTypes = await base44.entities.BlockType.filter({ active: true }, 'order_index');
-      const blocks = buildBlocks(blockTypes || []);
-
-      if (blocks.length > 0) {
-        await base44.entities.PresentationBlock.bulkCreate(blocks);
-      }
-
-      await base44.entities.Presentation.update(id, {
-        status: 'draft',
-        progress_percentage: 0,
-        last_opened_at: new Date().toISOString(),
-      });
-
-      toast({
-        title: 'Estrutura criada',
-        description: `${blocks.length} bloco${blocks.length === 1 ? '' : 's'} foram enviados ao editor.`,
-      });
-
-      navigate(`/presentations/${id}/editor`);
-    } catch (generateError) {
-      console.error('Erro ao gerar estrutura:', generateError);
-      toast({
-        title: 'Não foi possível gerar a estrutura',
-        description: 'Revise as respostas e tente novamente.',
-        variant: 'destructive',
-      });
-    } finally {
-      setGenerating(false);
-    }
+    await createGeneratedBlocks();
   };
 
   const handleNext = async () => {
     if (!validateCurrent()) return;
-
     if (isLastStep) {
       await handleGenerate();
       return;
     }
-
-    setCurrentStep((step) => Math.min(questions.length - 1, step + 1));
+    setCurrentStep((step) => Math.min(visibleQuestions.length - 1, step + 1));
   };
 
-  if (loading) return <LoadingState />;
+  if (userLoading || loading) return <LoadingState />;
 
   if (error) {
     return (
@@ -613,12 +828,12 @@ export default function GuidedCreation() {
     );
   }
 
-  if (!currentQuestion || questions.length === 0) {
+  if (!currentQuestion || visibleQuestions.length === 0) {
     return (
       <div className="mx-auto max-w-xl px-4 py-10">
         <Card>
           <CardContent className="p-6 text-center">
-            <p className="text-muted-foreground">Nenhuma pergunta foi configurada para este fluxo.</p>
+            <p className="text-muted-foreground">Nenhuma pergunta aplicável foi configurada para este fluxo.</p>
             <Button className="mt-4" onClick={() => navigate(`/presentations/${id}/editor`)}>
               Abrir editor
             </Button>
@@ -649,17 +864,13 @@ export default function GuidedCreation() {
               onClick={() => saveAnswers({ showToast: true })}
               disabled={saving || generating}
             >
-              {saving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="mr-2 h-4 w-4" />
-              )}
+              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
               Salvar
             </Button>
           </div>
 
           <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
-            <span>{currentStep + 1} de {questions.length}</span>
+            <span>{currentStep + 1} de {visibleQuestions.length}</span>
             <span>{answeredCount} respondida{answeredCount === 1 ? '' : 's'}</span>
           </div>
           <Progress value={progress} className="mt-2 h-1.5" />
@@ -673,13 +884,23 @@ export default function GuidedCreation() {
           </div>
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-primary">
-              {flow?.name || 'Criação guiada'}
+              {flow?.name || 'Guia essencial'}
             </p>
             <h1 className="truncate text-lg font-bold sm:text-xl">
               {presentation?.title || 'Nova apresentação'}
             </h1>
           </div>
         </div>
+
+        {!flow && (
+          <Alert className="mb-5">
+            <Sparkles className="h-4 w-4" />
+            <AlertTitle>Guia padrão em uso</AlertTitle>
+            <AlertDescription>
+              Ainda não há um fluxo administrativo específico para esta combinação. Suas respostas continuam sendo salvas e gerarão uma estrutura completa.
+            </AlertDescription>
+          </Alert>
+        )}
 
         <Card className="border-border/70 shadow-sm">
           <CardContent className="p-5 sm:p-8">
@@ -731,7 +952,7 @@ export default function GuidedCreation() {
             {!currentQuestion.required && !isLastStep && (
               <Button
                 variant="ghost"
-                onClick={() => setCurrentStep((step) => Math.min(questions.length - 1, step + 1))}
+                onClick={() => setCurrentStep((step) => Math.min(visibleQuestions.length - 1, step + 1))}
                 disabled={generating}
                 className="flex-1 sm:flex-none"
               >
@@ -764,6 +985,39 @@ export default function GuidedCreation() {
           </div>
         </div>
       </footer>
+
+      <AlertDialog open={replaceDialogOpen} onOpenChange={setReplaceDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Esta apresentação já possui tópicos</AlertDialogTitle>
+            <AlertDialogDescription>
+              Você pode manter a estrutura existente e abrir o editor, ou apagar somente os blocos atuais e gerar uma nova estrutura com estas respostas. O conteúdo apagado não poderá ser recuperado por esta ação.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel disabled={generating}>Cancelar</AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => navigate(`/presentations/${id}/editor`)}
+              disabled={generating}
+            >
+              Manter e abrir editor
+            </Button>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                setReplaceDialogOpen(false);
+                createGeneratedBlocks({ replaceExisting: true });
+              }}
+              disabled={generating}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Substituir estrutura
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
