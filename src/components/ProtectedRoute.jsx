@@ -1,36 +1,258 @@
-import { useEffect } from 'react';
-import { Outlet } from 'react-router-dom';
-import { useAuth } from '@/lib/AuthContext';
-import UserNotRegisteredError from '@/components/UserNotRegisteredError';
+import React, {
+  useEffect,
+  useMemo,
+} from 'react';
 
-const DefaultFallback = () => (
-  <div className="fixed inset-0 flex items-center justify-center">
-    <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></div>
-  </div>
-);
+import {
+  Navigate,
+  Outlet,
+  useLocation,
+} from 'react-router-dom';
 
-export default function ProtectedRoute({ fallback = <DefaultFallback />, unauthenticatedElement }) {
-  const { isAuthenticated, isLoadingAuth, authChecked, authError, checkUserAuth } = useAuth();
+import useCurrentUser from '@/hooks/useCurrentUser';
+
+function ProtectedRouteLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="flex flex-col items-center gap-4 text-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-muted border-t-primary" />
+
+        <div>
+          <p className="text-sm font-medium">
+            Verificando sua sessão...
+          </p>
+
+          <p className="mt-1 text-xs text-muted-foreground">
+            Aguarde alguns instantes.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AccessUnavailable() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-md rounded-2xl border bg-card p-6 text-center shadow-sm">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
+          !
+        </div>
+
+        <h1 className="mt-4 text-xl font-bold">
+          Não foi possível verificar sua conta
+        </h1>
+
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          Ocorreu uma falha temporária ao carregar seus dados.
+          Atualize a página e tente novamente.
+        </p>
+
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-5 inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+        >
+          Atualizar página
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function ProtectedRoute({
+  children,
+  unauthenticatedElement = null,
+  requireOnboarding = true,
+}) {
+  const location = useLocation();
+
+  const {
+    user,
+    profile,
+    loading,
+    error,
+  } = useCurrentUser();
+
+  const currentPath = useMemo(
+    () => (
+      `${location.pathname}${location.search || ''}`
+    ),
+    [
+      location.pathname,
+      location.search,
+    ],
+  );
+
+  /*
+  |--------------------------------------------------------------------------
+  | Preservar o endereço solicitado
+  |--------------------------------------------------------------------------
+  |
+  | Caso o usuário tente abrir uma rota privada sem autenticação,
+  | guardamos o endereço para retornar após o login.
+  |
+  */
 
   useEffect(() => {
-    if (!authChecked && !isLoadingAuth) {
-      checkUserAuth();
+    if (
+      !loading
+      && !user
+      && location.pathname !== '/login'
+    ) {
+      try {
+        window.sessionStorage.setItem(
+          'apresenta_redirect_after_login',
+          currentPath,
+        );
+      } catch (storageError) {
+        console.warn(
+          'Não foi possível salvar a rota de retorno:',
+          storageError,
+        );
+      }
     }
-  }, [authChecked, isLoadingAuth, checkUserAuth]);
+  }, [
+    currentPath,
+    loading,
+    location.pathname,
+    user,
+  ]);
 
-  if (isLoadingAuth || !authChecked) {
-    return fallback;
+  /*
+  |--------------------------------------------------------------------------
+  | Carregamento
+  |--------------------------------------------------------------------------
+  */
+
+  if (loading) {
+    return <ProtectedRouteLoading />;
   }
 
-  if (authError) {
-    if (authError.type === 'user_not_registered') {
-      return <UserNotRegisteredError />;
-    }
-    return unauthenticatedElement;
+  /*
+  |--------------------------------------------------------------------------
+  | Falha ao carregar autenticação
+  |--------------------------------------------------------------------------
+  |
+  | Evita ciclos de redirecionamento quando o serviço está indisponível.
+  |
+  */
+
+  if (error && user) {
+    return <AccessUnavailable />;
   }
 
-  if (!isAuthenticated) {
-    return unauthenticatedElement;
+  /*
+  |--------------------------------------------------------------------------
+  | Usuário não autenticado
+  |--------------------------------------------------------------------------
+  */
+
+  if (!user) {
+    if (unauthenticatedElement) {
+      return unauthenticatedElement;
+    }
+
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{
+          from: currentPath,
+        }}
+      />
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Conta inativa
+  |--------------------------------------------------------------------------
+  |
+  | Quando existe perfil e ele está explicitamente inativo,
+  | o acesso ao aplicativo deve ser bloqueado.
+  |
+  */
+
+  if (
+    profile
+    && profile.active === false
+  ) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{
+          reason: 'inactive_account',
+        }}
+      />
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Onboarding
+  |--------------------------------------------------------------------------
+  |
+  | A própria rota /onboarding precisa continuar acessível.
+  | Por isso não redirecionamos quando o usuário já está nela.
+  |
+  */
+
+  const isOnboardingRoute = (
+    location.pathname === '/onboarding'
+  );
+
+  const onboardingPending = (
+    !profile
+    || profile.onboarding_completed !== true
+  );
+
+  if (
+    requireOnboarding
+    && onboardingPending
+    && !isOnboardingRoute
+  ) {
+    return (
+      <Navigate
+        to="/onboarding"
+        replace
+        state={{
+          from: currentPath,
+        }}
+      />
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Usuário já concluiu onboarding
+  |--------------------------------------------------------------------------
+  |
+  | Evita que ele volte para /onboarding sem necessidade.
+  |
+  */
+
+  if (
+    isOnboardingRoute
+    && profile?.onboarding_completed === true
+  ) {
+    return (
+      <Navigate
+        to="/"
+        replace
+      />
+    );
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Conteúdo autorizado
+  |--------------------------------------------------------------------------
+  */
+
+  if (children) {
+    return children;
   }
 
   return <Outlet />;
