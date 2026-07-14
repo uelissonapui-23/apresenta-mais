@@ -1,101 +1,819 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  ArrowLeft,
+  ArrowRight,
+  BookOpen,
+  BriefcaseBusiness,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  GraduationCap,
+  LayoutList,
+  Loader2,
+  MessageSquareText,
+  Moon,
+  Presentation,
+  Settings2,
+  Sparkles,
+  Sun,
+  UserRound,
+  Wand2,
+} from 'lucide-react';
+
 import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
+import { useToast } from '@/components/ui/use-toast';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 
-export default function Onboarding() {
-  const { user, profile } = useCurrentUser();
-  const navigate = useNavigate();
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState(user?.full_name || '');
-  const [phone, setPhone] = useState('');
-  const [saving, setSaving] = useState(false);
+const TOTAL_STEPS = 5;
 
-  const handleFinish = async () => {
-    setSaving(true);
-    if (profile) {
-      await base44.entities.UserProfile.update(profile.id, { name, phone, onboarding_completed: true });
-    } else {
-      await base44.entities.UserProfile.create({ user_id: user.id, name, phone, onboarding_completed: true, role: 'user' });
-    }
-    await base44.entities.UserPreference.create({ user_id: user.id });
-    setSaving(false);
-    navigate('/');
-  };
+const USAGE_OPTIONS = [
+  {
+    id: 'sermon',
+    title: 'Pregações e estudos',
+    description: 'Organize mensagens, estudos bíblicos, devocionais e testemunhos.',
+    icon: BookOpen,
+  },
+  {
+    id: 'class',
+    title: 'Aulas e treinamentos',
+    description: 'Crie conteúdos didáticos, exercícios, revisões e materiais de apoio.',
+    icon: GraduationCap,
+  },
+  {
+    id: 'talk',
+    title: 'Palestras e eventos',
+    description: 'Estruture histórias, argumentos, exemplos e chamadas para ação.',
+    icon: Presentation,
+  },
+  {
+    id: 'business',
+    title: 'Reuniões e projetos',
+    description: 'Apresente propostas, resultados, planos, projetos e ideias.',
+    icon: BriefcaseBusiness,
+  },
+];
 
-  const steps = [
-    {
-      title: 'Bem-vindo ao Apresenta+',
-      desc: 'Seu assistente completo para criar, organizar, ensaiar e realizar apresentações.',
-      content: (
-        <div className="flex flex-col items-center gap-4 py-8">
-          <div className="w-24 h-24 rounded-full bg-primary/10 flex items-center justify-center">
-            <span className="text-4xl">🎤</span>
-          </div>
-          <p className="text-center text-muted-foreground max-w-sm">
-            Escreva uma vez e visualize de diferentes formas. Ensaie com cronômetro e progresso. Apresente sem se perder.
-          </p>
-        </div>
-      ),
-    },
-    {
-      title: 'Como devemos te chamar?',
-      desc: 'Precisamos de algumas informações básicas.',
-      content: (
-        <div className="space-y-4 py-4">
-          <div>
-            <Label>Nome</Label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="Seu nome" />
-          </div>
-          <div>
-            <Label>Telefone (opcional)</Label>
-            <Input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(00) 00000-0000" />
-          </div>
-        </div>
-      ),
-    },
-    {
-      title: 'Tudo pronto!',
-      desc: 'Você já pode começar a criar suas apresentações.',
-      content: (
-        <div className="flex flex-col items-center gap-4 py-8">
-          <div className="w-24 h-24 rounded-full bg-green-100 flex items-center justify-center">
-            <span className="text-4xl">✅</span>
-          </div>
-          <p className="text-center text-muted-foreground max-w-sm">
-            Explore os modelos prontos ou crie do zero com ajuda guiada.
-          </p>
-        </div>
-      ),
-    },
-  ];
+const DETAIL_OPTIONS = [
+  {
+    value: 'compact',
+    title: 'Compacto',
+    description: 'Mostra somente os títulos dos tópicos.',
+  },
+  {
+    value: 'normal',
+    title: 'Normal',
+    description: 'Mostra títulos e resumos. Recomendado para começar.',
+  },
+  {
+    value: 'detailed',
+    title: 'Detalhado',
+    description: 'Mostra título, resumo e conteúdo principal.',
+  },
+  {
+    value: 'complete',
+    title: 'Completo',
+    description: 'Mostra todo o conteúdo e notas quando permitido.',
+  },
+];
+
+const VIEW_OPTIONS = [
+  {
+    value: 'structure',
+    title: 'Estrutura',
+    description: 'Tópicos e subtópicos organizados em níveis.',
+  },
+  {
+    value: 'text',
+    title: 'Texto linear',
+    description: 'Conteúdo em formato semelhante a um documento.',
+  },
+  {
+    value: 'cards',
+    title: 'Cartões',
+    description: 'Cada ideia em um cartão fácil de reorganizar.',
+  },
+  {
+    value: 'script',
+    title: 'Roteiro',
+    description: 'Visão enxuta com os pontos principais e o tempo.',
+  },
+];
+
+function normalizePhone(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 11);
+}
+
+function formatPhone(value) {
+  const digits = normalizePhone(value);
+
+  if (digits.length <= 2) {
+    return digits;
+  }
+
+  if (digits.length <= 6) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  }
+
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+}
+
+function OnboardingLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="flex flex-col items-center gap-3 text-muted-foreground">
+        <Loader2 className="h-9 w-9 animate-spin text-primary" />
+        <p className="text-sm">Preparando sua configuração...</p>
+      </div>
+    </div>
+  );
+}
+
+function StepHeader({ step, title, description }) {
+  const progress = ((step + 1) / TOTAL_STEPS) * 100;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md space-y-6">
-        <div className="flex gap-1 mb-8">
-          {steps.map((_, i) => (
-            <div key={i} className={`h-1 flex-1 rounded-full ${i <= step ? 'bg-primary' : 'bg-muted'}`} />
-          ))}
+    <div>
+      <div className="mb-4 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span>Etapa {step + 1} de {TOTAL_STEPS}</span>
+        <span>{Math.round(progress)}%</span>
+      </div>
+
+      <Progress value={progress} className="h-2" />
+
+      <div className="mt-6">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+          {title}
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function SelectableCard({ selected, icon: Icon, title, description, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`
+        flex w-full items-start gap-3 rounded-2xl border p-4 text-left transition-all
+        ${selected
+          ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/25'
+          : 'border-border bg-background hover:border-primary/35 hover:bg-muted/30'}
+      `}
+    >
+      <div
+        className={`
+          flex h-11 w-11 shrink-0 items-center justify-center rounded-xl
+          ${selected ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground/75'}
+        `}
+      >
+        <Icon className="h-5 w-5" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <p className="font-semibold leading-tight">{title}</p>
+          <div
+            className={`
+              flex h-5 w-5 shrink-0 items-center justify-center rounded-full border
+              ${selected ? 'border-primary bg-primary text-primary-foreground' : 'border-muted-foreground/30'}
+            `}
+          >
+            {selected && <Check className="h-3.5 w-3.5" />}
+          </div>
         </div>
 
-        <h1 className="text-2xl font-bold">{steps[step].title}</h1>
-        <p className="text-muted-foreground">{steps[step].desc}</p>
-        {steps[step].content}
+        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </button>
+  );
+}
 
-        <div className="flex gap-3">
-          {step > 0 && <Button variant="outline" className="flex-1" onClick={() => setStep(s => s - 1)}>Voltar</Button>}
-          {step < steps.length - 1 ? (
-            <Button className="flex-1" onClick={() => setStep(s => s + 1)}>Continuar</Button>
-          ) : (
-            <Button className="flex-1" onClick={handleFinish} disabled={saving}>
-              {saving ? 'Salvando...' : 'Começar'}
+export default function Onboarding() {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+  const { user, profile, loading: userLoading } = useCurrentUser();
+
+  const [step, setStep] = useState(0);
+  const [initializing, setInitializing] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [about, setAbout] = useState('');
+  const [primaryUsage, setPrimaryUsage] = useState('sermon');
+
+  const [defaultViewMode, setDefaultViewMode] = useState('structure');
+  const [defaultDetailLevel, setDefaultDetailLevel] = useState('normal');
+  const [useDarkMode, setUseDarkMode] = useState(false);
+  const [showTimer, setShowTimer] = useState(true);
+  const [showProgress, setShowProgress] = useState(true);
+  const [showNextBlock, setShowNextBlock] = useState(true);
+  const [autoMarkCompleted, setAutoMarkCompleted] = useState(true);
+  const [confirmBeforeRestart, setConfirmBeforeRestart] = useState(true);
+
+  const [finishAction, setFinishAction] = useState('guided');
+
+  useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
+    if (!user?.id) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    setName(profile?.name || user?.full_name || user?.name || '');
+    setPhone(profile?.phone || '');
+    setInitializing(false);
+  }, [navigate, profile, user, userLoading]);
+
+  const selectedUsage = useMemo(
+    () => USAGE_OPTIONS.find((option) => option.id === primaryUsage),
+    [primaryUsage],
+  );
+
+  const canContinue = useMemo(() => {
+    if (step === 1) {
+      return name.trim().length >= 2;
+    }
+
+    return true;
+  }, [name, step]);
+
+  const goNext = () => {
+    if (!canContinue) {
+      toast({
+        title: 'Informe seu nome',
+        description: 'Digite pelo menos dois caracteres para continuar.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setStep((current) => Math.min(TOTAL_STEPS - 1, current + 1));
+  };
+
+  const goBack = () => {
+    setStep((current) => Math.max(0, current - 1));
+  };
+
+  const saveOnboarding = async () => {
+    if (!user?.id || saving) {
+      return;
+    }
+
+    if (name.trim().length < 2) {
+      setStep(1);
+      toast({
+        title: 'Nome obrigatório',
+        description: 'Informe como você deseja ser chamado.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSaving(true);
+
+    try {
+      const profilePayload = {
+        user_id: user.id,
+        name: name.trim(),
+        phone: phone.trim(),
+        onboarding_completed: true,
+        active: true,
+      };
+
+      if (profile?.id) {
+        await base44.entities.UserProfile.update(profile.id, profilePayload);
+      } else {
+        await base44.entities.UserProfile.create({
+          ...profilePayload,
+          role: 'user',
+        });
+      }
+
+      const existingPreferences = await base44.entities.UserPreference.filter({
+        user_id: user.id,
+      });
+
+      const accessibilitySettings = {
+        high_contrast: false,
+        reduce_motion: false,
+        large_controls: false,
+        left_aligned_text: true,
+        increased_spacing: false,
+        primary_usage: primaryUsage,
+        profile_note: about.trim(),
+      };
+
+      const preferencePayload = {
+        user_id: user.id,
+        default_view_mode: defaultViewMode,
+        default_detail_level: defaultDetailLevel,
+        default_font_size: 16,
+        presentation_font_size: 28,
+        use_dark_mode: useDarkMode,
+        show_timer: showTimer,
+        show_next_block: showNextBlock,
+        show_progress: showProgress,
+        auto_mark_completed: autoMarkCompleted,
+        confirm_before_restart: confirmBeforeRestart,
+        accessibility_settings_json: JSON.stringify(accessibilitySettings),
+      };
+
+      if (existingPreferences?.[0]?.id) {
+        await base44.entities.UserPreference.update(
+          existingPreferences[0].id,
+          preferencePayload,
+        );
+      } else {
+        await base44.entities.UserPreference.create(preferencePayload);
+      }
+
+      toast({
+        title: 'Configuração concluída',
+        description: 'Seu espaço está pronto para receber a primeira apresentação.',
+      });
+
+      if (finishAction === 'guided') {
+        navigate('/new-presentation?mode=guided', { replace: true });
+      } else if (finishAction === 'template') {
+        navigate('/templates', { replace: true });
+      } else {
+        navigate('/', { replace: true });
+      }
+    } catch (error) {
+      console.error('Erro ao concluir onboarding:', error);
+      toast({
+        title: 'Não foi possível concluir',
+        description: 'Confira sua conexão e tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (userLoading || initializing) {
+    return <OnboardingLoading />;
+  }
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-muted/25 px-4 py-5 sm:px-6 sm:py-8">
+      <div className="mx-auto w-full max-w-3xl">
+        <div className="mb-5 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 font-bold">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <Presentation className="h-5 w-5" />
+            </div>
+            <span>Apresenta+</span>
+          </div>
+
+          {step > 0 && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/')}
+              disabled={saving}
+            >
+              Configurar depois
             </Button>
           )}
         </div>
+
+        <Card className="overflow-hidden border-border/70 shadow-sm">
+          <CardContent className="p-5 sm:p-8">
+            {step === 0 && (
+              <div>
+                <StepHeader
+                  step={step}
+                  title="Bem-vindo ao seu assistente de apresentações"
+                  description="Vamos configurar o aplicativo para ajudar você a construir, organizar, ensaiar e apresentar com mais segurança."
+                />
+
+                <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Wand2 className="h-5 w-5" />
+                    </div>
+                    <h2 className="mt-3 font-semibold">Construir</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Receba orientação desde a primeira ideia até a conclusão.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                      <Settings2 className="h-5 w-5" />
+                    </div>
+                    <h2 className="mt-3 font-semibold">Organizar</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Mude a ordem, o nível e o tamanho das informações facilmente.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl border bg-background p-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <MessageSquareText className="h-5 w-5" />
+                    </div>
+                    <h2 className="mt-3 font-semibold">Apresentar</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Acompanhe tópicos, tempo e progresso sem se perder.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-6 rounded-2xl bg-primary/5 p-4 text-sm leading-relaxed text-muted-foreground">
+                  Você poderá alterar todas essas configurações depois. Esta etapa apenas define os padrões iniciais.
+                </div>
+              </div>
+            )}
+
+            {step === 1 && (
+              <div>
+                <StepHeader
+                  step={step}
+                  title="Como devemos chamar você?"
+                  description="Esses dados serão usados no seu perfil e podem ser alterados depois."
+                />
+
+                <div className="mt-7 space-y-5">
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Nome *</Label>
+                    <div className="relative">
+                      <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        id="name"
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        placeholder="Seu nome"
+                        className="pl-9"
+                        maxLength={80}
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone ou WhatsApp</Label>
+                    <Input
+                      id="phone"
+                      value={formatPhone(phone)}
+                      onChange={(event) => setPhone(normalizePhone(event.target.value))}
+                      placeholder="(00) 00000-0000"
+                      inputMode="tel"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Campo opcional. Não será exibido nas apresentações.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="about">O que você costuma apresentar?</Label>
+                    <Textarea
+                      id="about"
+                      value={about}
+                      onChange={(event) => setAbout(event.target.value)}
+                      placeholder="Exemplo: pregações, estudos, aulas para jovens e reuniões..."
+                      rows={4}
+                      maxLength={300}
+                    />
+                    <p className="text-right text-xs text-muted-foreground">
+                      {about.length}/300
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 2 && (
+              <div>
+                <StepHeader
+                  step={step}
+                  title="Qual será seu uso principal?"
+                  description="Essa escolha ajuda o aplicativo a recomendar modelos e fluxos mais úteis."
+                />
+
+                <div className="mt-7 grid gap-3 sm:grid-cols-2">
+                  {USAGE_OPTIONS.map((option) => (
+                    <SelectableCard
+                      key={option.id}
+                      selected={primaryUsage === option.id}
+                      icon={option.icon}
+                      title={option.title}
+                      description={option.description}
+                      onClick={() => setPrimaryUsage(option.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {step === 3 && (
+              <div>
+                <StepHeader
+                  step={step}
+                  title="Escolha como prefere trabalhar"
+                  description="Defina a visualização e a quantidade de informação mostrada por padrão."
+                />
+
+                <div className="mt-7 grid gap-6 lg:grid-cols-2">
+                  <div>
+                    <Label className="text-base font-semibold">Visualização inicial</Label>
+                    <RadioGroup
+                      value={defaultViewMode}
+                      onValueChange={setDefaultViewMode}
+                      className="mt-3 gap-2"
+                    >
+                      {VIEW_OPTIONS.map((option) => (
+                        <Label
+                          key={option.value}
+                          htmlFor={`view-${option.value}`}
+                          className={`
+                            flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors
+                            ${defaultViewMode === option.value
+                              ? 'border-primary bg-primary/5'
+                              : 'hover:bg-muted/40'}
+                          `}
+                        >
+                          <RadioGroupItem
+                            id={`view-${option.value}`}
+                            value={option.value}
+                            className="mt-0.5"
+                          />
+                          <span>
+                            <span className="block font-medium">{option.title}</span>
+                            <span className="mt-0.5 block text-xs font-normal leading-relaxed text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                        </Label>
+                      ))}
+                    </RadioGroup>
+                  </div>
+
+                  <div>
+                    <Label className="text-base font-semibold">Nível de informação</Label>
+                    <RadioGroup
+                      value={defaultDetailLevel}
+                      onValueChange={setDefaultDetailLevel}
+                      className="mt-3 gap-2"
+                    >
+                      {DETAIL_OPTIONS.map((option) => (
+                        <Label
+                          key={option.value}
+                          htmlFor={`detail-${option.value}`}
+                          className={`
+                            flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors
+                            ${defaultDetailLevel === option.value
+                              ? 'border-primary bg-primary/5'
+                              : 'hover:bg-muted/40'}
+                          `}
+                        >
+                          <RadioGroupItem
+                            id={`detail-${option.value}`}
+                            value={option.value}
+                            className="mt-0.5"
+                          />
+                          <span>
+                            <span className="block font-medium">{option.title}</span>
+                            <span className="mt-0.5 block text-xs font-normal leading-relaxed text-muted-foreground">
+                              {option.description}
+                            </span>
+                          </span>
+                        </Label>
+                      ))}
+                    </RadioGroup>
+                  </div>
+                </div>
+
+                <div className="mt-6 space-y-3 rounded-2xl border bg-background p-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted">
+                        {useDarkMode ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                      </div>
+                      <div>
+                        <p className="font-medium">Usar modo escuro</p>
+                        <p className="text-xs text-muted-foreground">
+                          Pode ser alterado nas configurações a qualquer momento.
+                        </p>
+                      </div>
+                    </div>
+                    <Switch checked={useDarkMode} onCheckedChange={setUseDarkMode} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 border-t pt-3">
+                    <div>
+                      <p className="font-medium">Mostrar cronômetro</p>
+                      <p className="text-xs text-muted-foreground">Acompanhe o tempo durante ensaios e apresentações.</p>
+                    </div>
+                    <Switch checked={showTimer} onCheckedChange={setShowTimer} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 border-t pt-3">
+                    <div>
+                      <p className="font-medium">Mostrar progresso</p>
+                      <p className="text-xs text-muted-foreground">Veja visualmente o que já foi apresentado.</p>
+                    </div>
+                    <Switch checked={showProgress} onCheckedChange={setShowProgress} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 border-t pt-3">
+                    <div>
+                      <p className="font-medium">Mostrar próximo tópico</p>
+                      <p className="text-xs text-muted-foreground">Ajuda a manter a sequência sem se perder.</p>
+                    </div>
+                    <Switch checked={showNextBlock} onCheckedChange={setShowNextBlock} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 border-t pt-3">
+                    <div>
+                      <p className="font-medium">Concluir automaticamente</p>
+                      <p className="text-xs text-muted-foreground">Ao avançar, marca o tópico anterior como apresentado.</p>
+                    </div>
+                    <Switch checked={autoMarkCompleted} onCheckedChange={setAutoMarkCompleted} />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 border-t pt-3">
+                    <div>
+                      <p className="font-medium">Confirmar antes de recomeçar</p>
+                      <p className="text-xs text-muted-foreground">Evita apagar o progresso atual por engano.</p>
+                    </div>
+                    <Switch checked={confirmBeforeRestart} onCheckedChange={setConfirmBeforeRestart} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && (
+              <div>
+                <StepHeader
+                  step={step}
+                  title="Tudo pronto para começar"
+                  description="Escolha o melhor próximo passo. Sua configuração será salva antes de continuar."
+                />
+
+                <div className="mt-7 rounded-2xl border bg-muted/25 p-4 sm:p-5">
+                  <div className="flex items-start gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      <CheckCircle2 className="h-6 w-6" />
+                    </div>
+                    <div className="min-w-0">
+                      <h2 className="font-semibold">Configuração preparada</h2>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Perfil: <strong className="text-foreground">{name.trim()}</strong>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Uso principal: <strong className="text-foreground">{selectedUsage?.title}</strong>
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Visualização: <strong className="text-foreground">{VIEW_OPTIONS.find((item) => item.value === defaultViewMode)?.title}</strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setFinishAction('guided')}
+                    className={`
+                      flex items-center gap-3 rounded-2xl border p-4 text-left transition-all
+                      ${finishAction === 'guided'
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/25'
+                        : 'hover:border-primary/35'}
+                    `}
+                  >
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <Wand2 className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Criar minha primeira apresentação com ajuda</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        O aplicativo fará perguntas e montará uma estrutura para você.
+                      </p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFinishAction('template')}
+                    className={`
+                      flex items-center gap-3 rounded-2xl border p-4 text-left transition-all
+                      ${finishAction === 'template'
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/25'
+                        : 'hover:border-primary/35'}
+                    `}
+                  >
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                      <LayoutList className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Explorar modelos prontos</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Escolha uma estrutura pronta e adapte ao seu conteúdo.
+                      </p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setFinishAction('dashboard')}
+                    className={`
+                      flex items-center gap-3 rounded-2xl border p-4 text-left transition-all
+                      ${finishAction === 'dashboard'
+                        ? 'border-primary bg-primary/5 ring-1 ring-primary/25'
+                        : 'hover:border-primary/35'}
+                    `}
+                  >
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-muted">
+                      <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold">Ir para o painel</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Conheça o aplicativo antes de começar uma apresentação.
+                      </p>
+                    </div>
+                    <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-8 flex flex-col-reverse gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                {step > 0 && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={goBack}
+                    disabled={saving}
+                    className="w-full sm:w-auto"
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Voltar
+                  </Button>
+                )}
+              </div>
+
+              {step < TOTAL_STEPS - 1 ? (
+                <Button
+                  type="button"
+                  onClick={goNext}
+                  disabled={!canContinue || saving}
+                  className="w-full sm:w-auto"
+                >
+                  Continuar
+                  <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  onClick={saveOnboarding}
+                  disabled={saving}
+                  className="w-full sm:w-auto"
+                >
+                  {saving ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      Concluir e continuar
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
