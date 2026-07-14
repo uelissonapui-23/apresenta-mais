@@ -1,148 +1,518 @@
-import { Toaster } from "@/components/ui/toaster"
-import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClientInstance } from '@/lib/query-client'
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
-import PageNotFound from './lib/PageNotFound';
-import { AuthProvider, useAuth } from '@/lib/AuthContext';
-import UserNotRegisteredError from '@/components/UserNotRegisteredError';
-import ScrollToTop from './components/ScrollToTop';
+import React, {
+  lazy,
+  Suspense,
+} from 'react';
+
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router-dom';
+
+import {
+  QueryClientProvider,
+} from '@tanstack/react-query';
+
+import { Toaster } from '@/components/ui/toaster';
+import { queryClientInstance } from '@/lib/query-client';
+import {
+  AuthProvider,
+} from '@/lib/AuthContext';
+
 import ProtectedRoute from '@/components/ProtectedRoute';
-
-// Auth pages
-import Login from '@/pages/Login';
-import Register from '@/pages/Register';
-import ForgotPassword from '@/pages/ForgotPassword';
-import ResetPassword from '@/pages/ResetPassword';
-
-// Public legal pages
-import Terms from '@/pages/Terms';
-import Privacy from '@/pages/Privacy';
-
-// Layout
-import AppLayout from '@/components/layout/AppLayout';
 import AdminRoute from '@/components/AdminRoute';
+import ScrollToTop from '@/components/ScrollToTop';
 
-// Pages
-import Home from '@/pages/Home';
-import Presentations from '@/pages/Presentations';
-import NewPresentation from '@/pages/NewPresentation';
-import PresentationEditor from '@/pages/PresentationEditor';
-import PresentationOverview from '@/pages/PresentationOverview';
-import GuidedCreation from '@/pages/GuidedCreation';
-import Templates from '@/pages/Templates';
-import Library from '@/pages/Library';
-import Rehearsal from '@/pages/Rehearsal';
-import PresentMode from '@/pages/PresentMode';
-import SessionHistory from '@/pages/SessionHistory';
-import ThemesPage from '@/pages/ThemesPage';
-import Settings from '@/pages/Settings';
-import Profile from '@/pages/Profile';
-import Onboarding from '@/pages/Onboarding';
+import AppLayout from '@/components/layout/AppLayout';
+import PageNotFound from '@/lib/PageNotFound';
 
-// Admin pages
-import AdminDashboard from '@/pages/admin/AdminDashboard';
-import AdminUsers from '@/pages/admin/AdminUsers';
-import AdminPlans from '@/pages/admin/AdminPlans';
-import AdminTypes from '@/pages/admin/AdminTypes';
-import AdminObjectives from '@/pages/admin/AdminObjectives';
-import AdminStyles from '@/pages/admin/AdminStyles';
-import AdminBlockTypes from '@/pages/admin/AdminBlockTypes';
-import AdminTemplates from '@/pages/admin/AdminTemplates';
-import AdminGuidedFlows from '@/pages/admin/AdminGuidedFlows';
-import AdminQuestions from '@/pages/admin/AdminQuestions';
-import AdminThemes from '@/pages/admin/AdminThemes';
-import AdminTips from '@/pages/admin/AdminTips';
+/*
+|--------------------------------------------------------------------------
+| Carregamento sob demanda
+|--------------------------------------------------------------------------
+|
+| Cada página é carregada somente quando o usuário abre a rota.
+| Isso reduz o tamanho inicial do JavaScript e melhora a abertura do app.
+|
+*/
 
-const AuthenticatedApp = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin } = useAuth();
+// Autenticação
+const Login = lazy(() => import('@/pages/Login'));
+const Register = lazy(() => import('@/pages/Register'));
+const ForgotPassword = lazy(
+  () => import('@/pages/ForgotPassword'),
+);
+const ResetPassword = lazy(
+  () => import('@/pages/ResetPassword'),
+);
 
-  if (isLoadingPublicSettings || isLoadingAuth) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center">
-        <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></div>
+// Páginas legais
+const Terms = lazy(() => import('@/pages/Terms'));
+const Privacy = lazy(() => import('@/pages/Privacy'));
+
+// Primeiro acesso
+const Onboarding = lazy(
+  () => import('@/pages/Onboarding'),
+);
+
+// Aplicativo
+const Home = lazy(() => import('@/pages/Home'));
+const Presentations = lazy(
+  () => import('@/pages/Presentations'),
+);
+const NewPresentation = lazy(
+  () => import('@/pages/NewPresentation'),
+);
+const GuidedCreation = lazy(
+  () => import('@/pages/GuidedCreation'),
+);
+const PresentationEditor = lazy(
+  () => import('@/pages/PresentationEditor'),
+);
+const PresentationOverview = lazy(
+  () => import('@/pages/PresentationOverview'),
+);
+const Templates = lazy(
+  () => import('@/pages/Templates'),
+);
+const Library = lazy(
+  () => import('@/pages/Library'),
+);
+const ThemesPage = lazy(
+  () => import('@/pages/ThemesPage'),
+);
+const Settings = lazy(
+  () => import('@/pages/Settings'),
+);
+const Profile = lazy(
+  () => import('@/pages/Profile'),
+);
+
+// Sessões
+const Rehearsal = lazy(
+  () => import('@/pages/Rehearsal'),
+);
+const PresentMode = lazy(
+  () => import('@/pages/PresentMode'),
+);
+const SessionHistory = lazy(
+  () => import('@/pages/SessionHistory'),
+);
+
+// Administração
+const AdminDashboard = lazy(
+  () => import('@/pages/admin/AdminDashboard'),
+);
+const AdminUsers = lazy(
+  () => import('@/pages/admin/AdminUsers'),
+);
+const AdminPlans = lazy(
+  () => import('@/pages/admin/AdminPlans'),
+);
+const AdminTypes = lazy(
+  () => import('@/pages/admin/AdminTypes'),
+);
+const AdminObjectives = lazy(
+  () => import('@/pages/admin/AdminObjectives'),
+);
+const AdminStyles = lazy(
+  () => import('@/pages/admin/AdminStyles'),
+);
+const AdminBlockTypes = lazy(
+  () => import('@/pages/admin/AdminBlockTypes'),
+);
+const AdminTemplates = lazy(
+  () => import('@/pages/admin/AdminTemplates'),
+);
+const AdminGuidedFlows = lazy(
+  () => import('@/pages/admin/AdminGuidedFlows'),
+);
+const AdminQuestions = lazy(
+  () => import('@/pages/admin/AdminQuestions'),
+);
+const AdminThemes = lazy(
+  () => import('@/pages/admin/AdminThemes'),
+);
+const AdminTips = lazy(
+  () => import('@/pages/admin/AdminTips'),
+);
+
+/*
+|--------------------------------------------------------------------------
+| Tela de carregamento
+|--------------------------------------------------------------------------
+*/
+
+function AppLoading() {
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-4">
+        <div className="relative flex h-14 w-14 items-center justify-center">
+          <div className="absolute inset-0 rounded-full border-4 border-muted" />
+
+          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-primary" />
+
+          <div className="h-4 w-4 rounded-full bg-primary" />
+        </div>
+
+        <div className="text-center">
+          <p className="text-sm font-medium">
+            Apresenta+
+          </p>
+
+          <p className="mt-1 text-xs text-muted-foreground">
+            Preparando sua experiência...
+          </p>
+        </div>
       </div>
+    </div>
+  );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Redirecionamento de rotas antigas
+|--------------------------------------------------------------------------
+|
+| Durante a estruturação, algumas páginas podem ter recebido links antigos.
+| Estas rotas mantêm compatibilidade sem quebrar a navegação.
+|
+*/
+
+function LegacyEditorRedirect() {
+  const location = useLocation();
+  const id = location.pathname
+    .replace('/presentation-editor/', '')
+    .replaceAll('/', '');
+
+  if (!id) {
+    return (
+      <Navigate
+        to="/presentations"
+        replace
+      />
     );
   }
 
-  if (authError) {
-    if (authError.type === 'user_not_registered') {
-      return <UserNotRegisteredError />;
-    } else if (authError.type === 'auth_required') {
-      navigateToLogin();
-      return null;
-    }
+  return (
+    <Navigate
+      to={`/presentations/${id}/editor`}
+      replace
+    />
+  );
+}
+
+function LegacyOverviewRedirect() {
+  const location = useLocation();
+  const id = location.pathname
+    .replace('/presentation-overview/', '')
+    .replaceAll('/', '');
+
+  if (!id) {
+    return (
+      <Navigate
+        to="/presentations"
+        replace
+      />
+    );
   }
 
   return (
-    <Routes>
-      {/* Public routes - no auth required */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
-      <Route path="/reset-password" element={<ResetPassword />} />
-      <Route path="/terms" element={<Terms />} />
-      <Route path="/privacy" element={<Privacy />} />
-
-      <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
-        {/* Onboarding - no layout */}
-        <Route path="/onboarding" element={<Onboarding />} />
-
-        {/* Presentation mode - no layout (full screen) */}
-        <Route path="/present/:id" element={<PresentMode />} />
-
-        {/* Rehearsal - no layout */}
-        <Route path="/rehearsal/:id" element={<Rehearsal />} />
-
-        {/* Main app with layout */}
-        <Route element={<AppLayout />}>
-          <Route path="/" element={<Home />} />
-          <Route path="/presentations" element={<Presentations />} />
-          <Route path="/new-presentation" element={<NewPresentation />} />
-          <Route path="/presentations/:id/editor" element={<PresentationEditor />} />
-          <Route path="/presentations/:id/overview" element={<PresentationOverview />} />
-          <Route path="/guided/:id" element={<GuidedCreation />} />
-          <Route path="/templates" element={<Templates />} />
-          <Route path="/library" element={<Library />} />
-          <Route path="/session-history/:id" element={<SessionHistory />} />
-          <Route path="/themes" element={<ThemesPage />} />
-          <Route path="/settings" element={<Settings />} />
-          <Route path="/profile" element={<Profile />} />
-
-          {/* Admin routes - protected by AdminRoute */}
-          <Route element={<AdminRoute />}>
-            <Route path="/admin" element={<AdminDashboard />} />
-            <Route path="/admin/users" element={<AdminUsers />} />
-            <Route path="/admin/plans" element={<AdminPlans />} />
-            <Route path="/admin/types" element={<AdminTypes />} />
-            <Route path="/admin/objectives" element={<AdminObjectives />} />
-            <Route path="/admin/styles" element={<AdminStyles />} />
-            <Route path="/admin/block-types" element={<AdminBlockTypes />} />
-            <Route path="/admin/templates" element={<AdminTemplates />} />
-            <Route path="/admin/guided-flows" element={<AdminGuidedFlows />} />
-            <Route path="/admin/guided-questions" element={<AdminQuestions />} />
-            <Route path="/admin/themes" element={<AdminThemes />} />
-            <Route path="/admin/tips" element={<AdminTips />} />
-          </Route>
-        </Route>
-      </Route>
-
-      <Route path="*" element={<PageNotFound />} />
-    </Routes>
+    <Navigate
+      to={`/presentations/${id}/overview`}
+      replace
+    />
   );
-};
-
-function App() {
-  return (
-    <AuthProvider>
-      <QueryClientProvider client={queryClientInstance}>
-        <Router>
-          <ScrollToTop />
-          <AuthenticatedApp />
-        </Router>
-        <Toaster />
-      </QueryClientProvider>
-    </AuthProvider>
-  )
 }
 
-export default App
+/*
+|--------------------------------------------------------------------------
+| Rotas
+|--------------------------------------------------------------------------
+*/
+
+function AppRoutes() {
+  return (
+    <Suspense fallback={<AppLoading />}>
+      <Routes>
+        {/*
+        |--------------------------------------------------------------------------
+        | Rotas públicas
+        |--------------------------------------------------------------------------
+        */}
+
+        <Route
+          path="/login"
+          element={<Login />}
+        />
+
+        <Route
+          path="/register"
+          element={<Register />}
+        />
+
+        <Route
+          path="/forgot-password"
+          element={<ForgotPassword />}
+        />
+
+        <Route
+          path="/reset-password"
+          element={<ResetPassword />}
+        />
+
+        <Route
+          path="/terms"
+          element={<Terms />}
+        />
+
+        <Route
+          path="/privacy"
+          element={<Privacy />}
+        />
+
+        {/*
+        |--------------------------------------------------------------------------
+        | Rotas protegidas
+        |--------------------------------------------------------------------------
+        */}
+
+        <Route
+          element={(
+            <ProtectedRoute
+              unauthenticatedElement={(
+                <Navigate
+                  to="/login"
+                  replace
+                />
+              )}
+            />
+          )}
+        >
+          {/*
+          |--------------------------------------------------------------------------
+          | Primeiro acesso
+          |--------------------------------------------------------------------------
+          |
+          | Fica fora do layout principal para manter a tela limpa.
+          |
+          */}
+
+          <Route
+            path="/onboarding"
+            element={<Onboarding />}
+          />
+
+          {/*
+          |--------------------------------------------------------------------------
+          | Modos de sessão
+          |--------------------------------------------------------------------------
+          |
+          | Ensaio e apresentação ficam fora do layout comum.
+          |
+          */}
+
+          <Route
+            path="/rehearsal/:id"
+            element={<Rehearsal />}
+          />
+
+          <Route
+            path="/present/:id"
+            element={<PresentMode />}
+          />
+
+          {/*
+          |--------------------------------------------------------------------------
+          | Aplicativo com layout principal
+          |--------------------------------------------------------------------------
+          */}
+
+          <Route element={<AppLayout />}>
+            <Route
+              index
+              element={<Home />}
+            />
+
+            <Route
+              path="/presentations"
+              element={<Presentations />}
+            />
+
+            <Route
+              path="/new-presentation"
+              element={<NewPresentation />}
+            />
+
+            <Route
+              path="/guided/:id"
+              element={<GuidedCreation />}
+            />
+
+            <Route
+              path="/presentations/:id/editor"
+              element={<PresentationEditor />}
+            />
+
+            <Route
+              path="/presentations/:id/overview"
+              element={<PresentationOverview />}
+            />
+
+            <Route
+              path="/session-history/:id"
+              element={<SessionHistory />}
+            />
+
+            <Route
+              path="/templates"
+              element={<Templates />}
+            />
+
+            <Route
+              path="/library"
+              element={<Library />}
+            />
+
+            <Route
+              path="/themes"
+              element={<ThemesPage />}
+            />
+
+            <Route
+              path="/settings"
+              element={<Settings />}
+            />
+
+            <Route
+              path="/profile"
+              element={<Profile />}
+            />
+
+            {/*
+            |--------------------------------------------------------------------------
+            | Compatibilidade com links antigos
+            |--------------------------------------------------------------------------
+            */}
+
+            <Route
+              path="/presentation-editor/:id"
+              element={<LegacyEditorRedirect />}
+            />
+
+            <Route
+              path="/presentation-overview/:id"
+              element={<LegacyOverviewRedirect />}
+            />
+
+            {/*
+            |--------------------------------------------------------------------------
+            | Administração
+            |--------------------------------------------------------------------------
+            */}
+
+            <Route element={<AdminRoute />}>
+              <Route
+                path="/admin"
+                element={<AdminDashboard />}
+              />
+
+              <Route
+                path="/admin/users"
+                element={<AdminUsers />}
+              />
+
+              <Route
+                path="/admin/plans"
+                element={<AdminPlans />}
+              />
+
+              <Route
+                path="/admin/types"
+                element={<AdminTypes />}
+              />
+
+              <Route
+                path="/admin/objectives"
+                element={<AdminObjectives />}
+              />
+
+              <Route
+                path="/admin/styles"
+                element={<AdminStyles />}
+              />
+
+              <Route
+                path="/admin/block-types"
+                element={<AdminBlockTypes />}
+              />
+
+              <Route
+                path="/admin/templates"
+                element={<AdminTemplates />}
+              />
+
+              <Route
+                path="/admin/guided-flows"
+                element={<AdminGuidedFlows />}
+              />
+
+              <Route
+                path="/admin/guided-questions"
+                element={<AdminQuestions />}
+              />
+
+              <Route
+                path="/admin/themes"
+                element={<AdminThemes />}
+              />
+
+              <Route
+                path="/admin/tips"
+                element={<AdminTips />}
+              />
+            </Route>
+          </Route>
+        </Route>
+
+        {/*
+        |--------------------------------------------------------------------------
+        | Página não encontrada
+        |--------------------------------------------------------------------------
+        |
+        | Deve permanecer sempre como a última rota.
+        |
+        */}
+
+        <Route
+          path="*"
+          element={<PageNotFound />}
+        />
+      </Routes>
+    </Suspense>
+  );
+}
+
+/*
+|--------------------------------------------------------------------------
+| Aplicativo principal
+|--------------------------------------------------------------------------
+*/
+
+export default function App() {
+  return (
+    <QueryClientProvider client={queryClientInstance}>
+      <AuthProvider>
+        <BrowserRouter>
+          <ScrollToTop />
+
+          <AppRoutes />
+        </BrowserRouter>
+
+        <Toaster />
+      </AuthProvider>
+    </QueryClientProvider>
+  );
+}
