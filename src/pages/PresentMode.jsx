@@ -270,6 +270,15 @@ export default function PresentMode() {
   const [showTimer, setShowTimer] = useState(true);
   const [showProgress, setShowProgress] = useState(true);
   const [showNextBlock, setShowNextBlock] = useState(true);
+  const [autoMarkCompleted, setAutoMarkCompleted] = useState(true);
+  const [confirmBeforeRestart, setConfirmBeforeRestart] = useState(true);
+  const [accessibility, setAccessibility] = useState({
+    high_contrast: false,
+    reduce_motion: false,
+    large_controls: false,
+    left_aligned_text: false,
+    increased_spacing: false,
+  });
   const [showNotes, setShowNotes] = useState(false);
   const [showAdditional, setShowAdditional] = useState(true);
   const [showTopicSheet, setShowTopicSheet] = useState(false);
@@ -278,6 +287,7 @@ export default function PresentMode() {
   const [pendingSession, setPendingSession] = useState(null);
   const [resumeDialogOpen, setResumeDialogOpen] = useState(false);
   const [endDialogOpen, setEndDialogOpen] = useState(false);
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false);
   const [endNotes, setEndNotes] = useState('');
 
   const visibleBlocks = useMemo(
@@ -518,6 +528,24 @@ export default function PresentMode() {
         setShowNextBlock(preference.show_next_block !== false);
         setShowProgress(preference.show_progress !== false);
         setDetailLevel(preference.default_detail_level || 'detailed');
+        setAutoMarkCompleted(preference.auto_mark_completed !== false);
+        setConfirmBeforeRestart(preference.confirm_before_restart !== false);
+
+        let parsedAccessibility = preference.accessibility_settings_json || {};
+        if (typeof parsedAccessibility === 'string') {
+          try {
+            parsedAccessibility = JSON.parse(parsedAccessibility);
+          } catch {
+            parsedAccessibility = {};
+          }
+        }
+
+        setAccessibility((current) => ({
+          ...current,
+          ...(parsedAccessibility && typeof parsedAccessibility === 'object'
+            ? parsedAccessibility
+            : {}),
+        }));
       }
 
       if (ordered.length === 0) {
@@ -727,10 +755,10 @@ export default function PresentMode() {
     }
 
     await activateIndex(currentIndexRef.current + 1, {
-      markPrevious: true,
+      markPrevious: autoMarkCompleted,
       previousStatus: 'completed',
     });
-  }, [activateIndex, visibleBlocks.length]);
+  }, [activateIndex, autoMarkCompleted, visibleBlocks.length]);
 
   const goPrevious = useCallback(async () => {
     if (currentIndexRef.current <= 0) return;
@@ -775,29 +803,44 @@ export default function PresentMode() {
   }, [applySessionState, pendingSession]);
 
   const handleRestartSession = useCallback(async () => {
-    if (!pendingSession || visibleBlocks.length === 0) return;
+    if (visibleBlocks.length === 0) return;
     setSaving(true);
 
     try {
-      await base44.entities.PresentationSession.update(
-        pendingSession.session.id,
-        {
-          status: 'completed',
-          finished_at: new Date().toISOString(),
-          elapsed_seconds: asNumber(pendingSession.elapsed),
-          notes: pendingSession.session.notes || 'Sessão reiniciada pelo usuário.',
-        },
-      );
+      const sessionToClose = pendingSession?.session || sessionRef.current;
+      const elapsedToSave = pendingSession
+        ? asNumber(pendingSession.elapsed)
+        : elapsedRef.current;
+
+      if (sessionToClose?.id) {
+        await base44.entities.PresentationSession.update(
+          sessionToClose.id,
+          {
+            status: 'completed',
+            finished_at: new Date().toISOString(),
+            elapsed_seconds: elapsedToSave,
+            notes: sessionToClose.notes || 'Sessão reiniciada pelo usuário.',
+          },
+        );
+      }
 
       const created = await createNewSession(visibleBlocks);
       setSession(created?.session || null);
       setProgressRows(created?.progress || []);
       setCurrentIndex(0);
+      currentIndexRef.current = 0;
       setElapsed(0);
+      elapsedRef.current = 0;
       setRunning(true);
       setPendingSession(null);
       setResumeDialogOpen(false);
+      setRestartDialogOpen(false);
+      setShowSettingsSheet(false);
       blockStartedAtRef.current = Date.now();
+      toast({
+        title: 'Apresentação recomeçada',
+        description: 'O histórico anterior foi preservado.',
+      });
     } catch (restartError) {
       console.error('Erro ao reiniciar sessão:', restartError);
       toast({
@@ -809,6 +852,15 @@ export default function PresentMode() {
       setSaving(false);
     }
   }, [createNewSession, pendingSession, toast, visibleBlocks]);
+
+  const requestRestartSession = useCallback(() => {
+    if (confirmBeforeRestart) {
+      setRestartDialogOpen(true);
+      return;
+    }
+
+    handleRestartSession();
+  }, [confirmBeforeRestart, handleRestartSession]);
 
   const handleEndPresentation = useCallback(async () => {
     if (!sessionRef.current?.id) {
@@ -929,6 +981,13 @@ export default function PresentMode() {
     : 'border-black/10 bg-white/95 text-slate-950';
 
   const detailValue = DETAIL_LEVELS[detailLevel] || DETAIL_LEVELS.detailed;
+  const controlSizeClass = accessibility.large_controls ? 'min-h-12 min-w-12' : '';
+  const motionClass = accessibility.reduce_motion ? '[&_*]:!transition-none [&_*]:!animate-none' : '';
+  const contrastClass = accessibility.high_contrast
+    ? darkMode
+      ? 'contrast-125'
+      : 'contrast-125'
+    : '';
 
   if (userLoading || loading) {
     return <LoadingScreen />;
@@ -1006,7 +1065,9 @@ export default function PresentMode() {
       </div>
 
       <main className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto overflow-x-hidden px-5 pb-28 pt-20 sm:px-10 md:px-16 lg:px-24">
-        <article className="mx-auto w-full max-w-5xl text-center">
+        <article
+          className={`mx-auto w-full max-w-5xl ${accessibility.left_aligned_text ? 'text-left' : 'text-center'} ${accessibility.increased_spacing ? 'space-y-3' : ''}`}
+        >
           <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
             <Badge variant="outline" className="border-current/20 bg-transparent text-current">
               {currentIndex + 1} de {visibleBlocks.length}
@@ -1100,7 +1161,7 @@ export default function PresentMode() {
         data-no-stage-click
         className={`absolute inset-x-0 bottom-0 z-40 p-3 transition-all duration-300 sm:p-5 ${showControls ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-6 opacity-0'}`}
       >
-        <div className={`mx-auto flex max-w-4xl items-center gap-2 rounded-2xl border p-2 shadow-2xl backdrop-blur-xl ${panelClasses}`}>
+        <div className={`mx-auto flex max-w-4xl items-center gap-2 rounded-2xl border p-2 shadow-2xl backdrop-blur-xl ${panelClasses} ${accessibility.large_controls ? '[&_button]:h-12 [&_button]:w-12' : ''}`}>
           <Button
             variant="ghost"
             size="icon"
@@ -1175,6 +1236,10 @@ export default function PresentMode() {
                 <DropdownMenuItem onClick={requestFullscreen}>
                   <Maximize2 className="mr-2 h-4 w-4" />
                   Tela cheia
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={requestRestartSession}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Recomeçar apresentação
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEndDialogOpen(true)} className="text-destructive">
                   <X className="mr-2 h-4 w-4" />
@@ -1385,6 +1450,16 @@ export default function PresentMode() {
               </Button>
             </div>
 
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={requestRestartSession}
+              disabled={saving}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Recomeçar apresentação
+            </Button>
+
             <div className="rounded-xl border border-current/10 p-4 text-xs leading-relaxed opacity-65">
               Atalhos: setas para navegar, espaço para avançar, P para pausar,
               F para tela cheia e L para abrir o roteiro.
@@ -1421,13 +1496,42 @@ export default function PresentMode() {
           )}
 
           <DialogFooter className="grid gap-2 sm:grid-cols-2">
-            <Button variant="outline" onClick={handleRestartSession} disabled={saving}>
+            <Button variant="outline" onClick={requestRestartSession} disabled={saving}>
               <RotateCcw className="mr-2 h-4 w-4" />
               Recomeçar
             </Button>
             <Button onClick={handleContinueSession} disabled={saving}>
               <Play className="mr-2 h-4 w-4" />
               Continuar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={restartDialogOpen} onOpenChange={setRestartDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Recomeçar apresentação?</DialogTitle>
+            <DialogDescription>
+              A sessão atual será encerrada e uma nova começará no primeiro tópico.
+              O histórico anterior será preservado.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setRestartDialogOpen(false)}
+              disabled={saving}
+            >
+              Cancelar
+            </Button>
+            <Button onClick={handleRestartSession} disabled={saving}>
+              {saving ? (
+                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="mr-2 h-4 w-4" />
+              )}
+              Recomeçar
             </Button>
           </DialogFooter>
         </DialogContent>
