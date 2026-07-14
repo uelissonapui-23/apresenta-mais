@@ -6,6 +6,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import BlockAttachmentsPanel from '@/components/editor/BlockAttachmentsPanel';
 
 export default function BlockEditor({
   block, blockTypes, detailLevel, onUpdate, onDelete, onDuplicate,
@@ -155,6 +156,8 @@ export default function BlockEditor({
                   />
                 </div>
               </div>
+
+              <BlockAttachmentsPanel blockId={block.id} />
             </div>
           )}
         </div>

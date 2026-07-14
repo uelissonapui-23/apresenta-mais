@@ -65,6 +65,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Textarea } from '@/components/ui/textarea';
+import BlockAttachmentsDisplay from '@/components/shared/BlockAttachmentsDisplay';
 
 const AUTO_HIDE_CONTROLS_MS = 4500;
 const AUTO_SAVE_SECONDS = 12;
@@ -1052,6 +1053,12 @@ export default function PresentMode() {
               style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
             >
               {currentBlock.additional_content}
+            </div>
+          )}
+
+          {currentBlock?.id && (
+            <div className="mx-auto mt-8 max-w-4xl text-left">
+              <BlockAttachmentsDisplay blockId={currentBlock.id} darkMode={darkMode} />
             </div>
           )}
         </article>

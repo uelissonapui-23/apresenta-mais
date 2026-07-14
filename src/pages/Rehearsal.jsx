@@ -46,6 +46,7 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { Textarea } from '@/components/ui/textarea';
+import BlockAttachmentsDisplay from '@/components/shared/BlockAttachmentsDisplay';
 
 const SAVE_INTERVAL_MS = 15000;
 
@@ -961,6 +962,10 @@ export default function Rehearsal() {
                   Este bloco ainda não possui conteúdo detalhado.
                 </CardContent>
               </Card>
+            )}
+
+            {currentBlock?.id && (
+              <BlockAttachmentsDisplay blockId={currentBlock.id} />
             )}
 
             {nextBlock && (

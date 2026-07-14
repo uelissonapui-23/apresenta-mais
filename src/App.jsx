@@ -14,8 +14,13 @@ import Register from '@/pages/Register';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
 
+// Public legal pages
+import Terms from '@/pages/Terms';
+import Privacy from '@/pages/Privacy';
+
 // Layout
 import AppLayout from '@/components/layout/AppLayout';
+import AdminRoute from '@/components/AdminRoute';
 
 // Pages
 import Home from '@/pages/Home';
@@ -70,10 +75,13 @@ const AuthenticatedApp = () => {
 
   return (
     <Routes>
+      {/* Public routes - no auth required */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
 
       <Route element={<ProtectedRoute unauthenticatedElement={<Navigate to="/login" replace />} />}>
         {/* Onboarding - no layout */}
@@ -100,19 +108,21 @@ const AuthenticatedApp = () => {
           <Route path="/settings" element={<Settings />} />
           <Route path="/profile" element={<Profile />} />
 
-          {/* Admin routes */}
-          <Route path="/admin" element={<AdminDashboard />} />
-          <Route path="/admin/users" element={<AdminUsers />} />
-          <Route path="/admin/plans" element={<AdminPlans />} />
-          <Route path="/admin/types" element={<AdminTypes />} />
-          <Route path="/admin/objectives" element={<AdminObjectives />} />
-          <Route path="/admin/styles" element={<AdminStyles />} />
-          <Route path="/admin/block-types" element={<AdminBlockTypes />} />
-          <Route path="/admin/templates" element={<AdminTemplates />} />
-          <Route path="/admin/guided-flows" element={<AdminGuidedFlows />} />
-          <Route path="/admin/guided-questions" element={<AdminQuestions />} />
-          <Route path="/admin/themes" element={<AdminThemes />} />
-          <Route path="/admin/tips" element={<AdminTips />} />
+          {/* Admin routes - protected by AdminRoute */}
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/users" element={<AdminUsers />} />
+            <Route path="/admin/plans" element={<AdminPlans />} />
+            <Route path="/admin/types" element={<AdminTypes />} />
+            <Route path="/admin/objectives" element={<AdminObjectives />} />
+            <Route path="/admin/styles" element={<AdminStyles />} />
+            <Route path="/admin/block-types" element={<AdminBlockTypes />} />
+            <Route path="/admin/templates" element={<AdminTemplates />} />
+            <Route path="/admin/guided-flows" element={<AdminGuidedFlows />} />
+            <Route path="/admin/guided-questions" element={<AdminQuestions />} />
+            <Route path="/admin/themes" element={<AdminThemes />} />
+            <Route path="/admin/tips" element={<AdminTips />} />
+          </Route>
         </Route>
       </Route>
 

@@ -56,6 +56,7 @@ import {
 } from '@/components/ui/dialog';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import EmptyState from '@/components/shared/EmptyState';
+import PresentationTagManager from '@/components/shared/PresentationTagManager';
 
 const PAGE_LIMIT = 200;
 

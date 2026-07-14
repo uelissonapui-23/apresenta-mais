@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Plus, List, FileText, LayoutGrid, ScrollText, Play, Eye, ChevronLeft, ChevronsUpDown, ChevronsDownUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { base44 } from '@/api/base44Client';
+import useCurrentUser from '@/hooks/useCurrentUser';
 import AutosaveIndicator from '@/components/shared/AutosaveIndicator';
 import DetailLevelControl from '@/components/shared/DetailLevelControl';
 import BlockTypeSelector from '@/components/editor/BlockTypeSelector';
@@ -24,6 +25,7 @@ const views = [
 export default function PresentationEditor() {
   const { id } = useParams();
   const { toast } = useToast();
+  const { user } = useCurrentUser();
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
   const [blockTypes, setBlockTypes] = useState([]);
@@ -46,12 +48,29 @@ export default function PresentationEditor() {
         setPresentation(p);
         setBlocks(b);
         setBlockTypes(bt);
-        setViewMode(p.default_view_mode || 'structure');
+
+        // Apply user preferences as fallback
+        if (user?.id) {
+          try {
+            const prefs = await base44.entities.UserPreference.filter({ user_id: user.id });
+            const pref = Array.isArray(prefs) && prefs.length > 0 ? prefs[0] : null;
+            if (pref) {
+              setViewMode(p.default_view_mode || pref.default_view_mode || 'structure');
+              setDetailLevel(pref.default_detail_level || 'normal');
+            } else {
+              setViewMode(p.default_view_mode || 'structure');
+            }
+          } catch {
+            setViewMode(p.default_view_mode || 'structure');
+          }
+        } else {
+          setViewMode(p.default_view_mode || 'structure');
+        }
       } catch (e) { console.error(e); }
       setLoading(false);
     };
     load();
-  }, [id]);
+  }, [id, user]);
 
   const handleUpdateBlock = useCallback(async (blockId, updates) => {
     setSaveStatus('saving');

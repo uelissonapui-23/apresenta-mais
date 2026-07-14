@@ -50,6 +50,7 @@ import {
 } from '@/components/ui/select';
 import ConfirmDialog from '@/components/shared/ConfirmDialog';
 import EmptyState from '@/components/shared/EmptyState';
+import TemplateBlockEditorDialog from '@/components/admin/TemplateBlockEditorDialog';
 
 const DEFAULT_FORM = {
   name: '',
@@ -311,6 +312,7 @@ export default function AdminTemplates() {
   const [types, setTypes] = useState([]);
   const [objectives, setObjectives] = useState([]);
   const [styles, setStyles] = useState([]);
+  const [blockTypes, setBlockTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState('');
@@ -324,6 +326,7 @@ export default function AdminTemplates() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [previewTemplate, setPreviewTemplate] = useState(null);
+  const [structureEditorTemplate, setStructureEditorTemplate] = useState(null);
 
   const isAdmin = profile?.role === 'admin';
 
@@ -337,12 +340,13 @@ export default function AdminTemplates() {
     if (!silent) setLoading(true);
 
     try {
-      const [templateRows, blockRows, typeRows, objectiveRows, styleRows] = await Promise.all([
+      const [templateRows, blockRows, typeRows, objectiveRows, styleRows, blockTypeRows] = await Promise.all([
         base44.entities.PresentationTemplate.list('-updated_date'),
         base44.entities.TemplateBlock.list('order_index'),
         base44.entities.PresentationType.list('order_index'),
         base44.entities.PresentationObjective.list('order_index'),
         base44.entities.CommunicationStyle.list('order_index'),
+        base44.entities.BlockType.filter({ active: true }, 'order_index'),
       ]);
 
       setTemplates(Array.isArray(templateRows) ? templateRows : []);
@@ -350,6 +354,7 @@ export default function AdminTemplates() {
       setTypes(Array.isArray(typeRows) ? typeRows : []);
       setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
       setStyles(Array.isArray(styleRows) ? styleRows : []);
+      setBlockTypes(Array.isArray(blockTypeRows) ? blockTypeRows : []);
     } catch (error) {
       console.error('Erro ao carregar modelos:', error);
       toast({
@@ -833,7 +838,10 @@ export default function AdminTemplates() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setPreviewTemplate(null)}>Fechar</Button>
             {previewTemplate?.id && (
-              <Button onClick={() => navigate(`/admin/templates/${previewTemplate.id}`)}>
+              <Button onClick={() => {
+                setStructureEditorTemplate(previewTemplate);
+                setPreviewTemplate(null);
+              }}>
                 <Layers3 className="mr-2 h-4 w-4" />
                 Editar estrutura
               </Button>
@@ -851,6 +859,15 @@ export default function AdminTemplates() {
         variant="destructive"
         onConfirm={confirmDelete}
         loading={Boolean(deleteTarget && busyId === deleteTarget.id)}
+      />
+
+      <TemplateBlockEditorDialog
+        open={Boolean(structureEditorTemplate)}
+        onOpenChange={(open) => !open && setStructureEditorTemplate(null)}
+        template={structureEditorTemplate}
+        blocks={templateBlocks}
+        blockTypes={blockTypes}
+        onBlocksChanged={handleRefresh}
       />
     </div>
   );
