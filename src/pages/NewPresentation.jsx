@@ -325,6 +325,8 @@ export default function NewPresentation() {
   const [objectives, setObjectives] = useState([]);
   const [styles, setStyles] = useState([]);
   const [themes, setThemes] = useState([]);
+  const [preference, setPreference] = useState(null);
+  const [plan, setPlan] = useState(null);
 
   const [form, setForm] = useState(DEFAULT_FORM);
   const [loading, setLoading] = useState(true);
@@ -337,7 +339,14 @@ export default function NewPresentation() {
     setLoadError('');
 
     try {
-      const [typeRows, objectiveRows, styleRows, themeRows] = await Promise.all([
+      const [
+        typeRows,
+        objectiveRows,
+        styleRows,
+        themeRows,
+        preferenceRows,
+        profileRows,
+      ] = await Promise.all([
         base44.entities.PresentationType.filter(
           { active: true },
           'order_index',
@@ -354,12 +363,67 @@ export default function NewPresentation() {
           { active: true },
           'name',
         ),
+        user?.id
+          ? base44.entities.UserPreference.filter({ user_id: user.id })
+          : Promise.resolve([]),
+        user?.id
+          ? base44.entities.UserProfile.filter({ user_id: user.id })
+          : Promise.resolve([]),
       ]);
 
-      setTypes(Array.isArray(typeRows) ? typeRows : []);
-      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
-      setStyles(Array.isArray(styleRows) ? styleRows : []);
-      setThemes(Array.isArray(themeRows) ? themeRows : []);
+      const safeTypes = Array.isArray(typeRows) ? typeRows : [];
+      const safeObjectives = Array.isArray(objectiveRows) ? objectiveRows : [];
+      const safeStyles = Array.isArray(styleRows) ? styleRows : [];
+      const safeThemes = Array.isArray(themeRows) ? themeRows : [];
+      const currentPreference = Array.isArray(preferenceRows)
+        ? preferenceRows[0] || null
+        : null;
+      const currentProfile = Array.isArray(profileRows)
+        ? profileRows[0] || null
+        : null;
+
+      setTypes(safeTypes);
+      setObjectives(safeObjectives);
+      setStyles(safeStyles);
+      setThemes(safeThemes);
+      setPreference(currentPreference);
+
+      if (currentProfile?.plan_id) {
+        try {
+          const planRows = await base44.entities.Plan.filter({
+            id: currentProfile.plan_id,
+            active: true,
+          });
+          setPlan(Array.isArray(planRows) ? planRows[0] || null : null);
+        } catch (planError) {
+          console.warn('Não foi possível carregar o plano atual:', planError);
+          setPlan(null);
+        }
+      } else {
+        setPlan(null);
+      }
+
+      setForm((current) => {
+        const preferredThemeExists = safeThemes.some(
+          (theme) => theme.id === currentPreference?.default_theme_id,
+        );
+        const preferredViewExists = VIEW_MODES.some(
+          (mode) => mode.value === currentPreference?.default_view_mode,
+        );
+
+        return {
+          ...current,
+          theme_id:
+            current.theme_id
+            || (preferredThemeExists ? currentPreference.default_theme_id : ''),
+          default_view_mode:
+            current.default_view_mode !== DEFAULT_FORM.default_view_mode
+              ? current.default_view_mode
+              : preferredViewExists
+                ? currentPreference.default_view_mode
+                : DEFAULT_FORM.default_view_mode,
+        };
+      });
     } catch (error) {
       console.error('Erro ao carregar opções da apresentação:', error);
       setLoadError('Não foi possível carregar as opções de criação.');
@@ -372,7 +436,7 @@ export default function NewPresentation() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, user?.id]);
 
   useEffect(() => {
     loadOptions();
@@ -452,6 +516,20 @@ export default function NewPresentation() {
     setValidationError('');
 
     try {
+      const maxPresentations = Number(plan?.max_presentations);
+
+      if (Number.isFinite(maxPresentations) && maxPresentations >= 0) {
+        const currentPresentations = await base44.entities.Presentation.filter({
+          user_id: user.id,
+          is_archived: false,
+        });
+
+        if (Array.isArray(currentPresentations)
+          && currentPresentations.length >= maxPresentations) {
+          throw new Error('PLAN_LIMIT_REACHED');
+        }
+      }
+
       const payload = {
         user_id: user.id,
         title: form.title.trim(),
@@ -499,6 +577,15 @@ export default function NewPresentation() {
       navigate(`/presentations/${presentation.id}/editor`);
     } catch (error) {
       console.error('Erro ao criar apresentação:', error);
+
+      if (error?.message === 'PLAN_LIMIT_REACHED') {
+        toast({
+          title: 'Limite de apresentações atingido',
+          description: 'Seu plano atual não permite criar outra apresentação ativa. Arquive uma apresentação ou altere seu plano.',
+          variant: 'destructive',
+        });
+        return;
+      }
 
       toast({
         title: 'Não foi possível criar a apresentação',
@@ -845,6 +932,16 @@ export default function NewPresentation() {
                 Escolha a duração planejada e como deseja abrir o editor.
               </p>
             </div>
+
+            {preference && (
+              <Alert className="border-primary/20 bg-primary/5">
+                <Sparkles className="h-4 w-4" />
+                <AlertTitle>Preferências aplicadas</AlertTitle>
+                <AlertDescription>
+                  O tema e a visualização inicial foram preenchidos com suas configurações padrão. Você pode alterá-los apenas para esta apresentação.
+                </AlertDescription>
+              </Alert>
+            )}
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
