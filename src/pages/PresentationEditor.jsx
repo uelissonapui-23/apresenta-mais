@@ -78,6 +78,15 @@ function normalizeParentId(value) {
   return value || null;
 }
 
+function uniqueById(rows) {
+  const seen = new Set();
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    if (!row?.id || seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  });
+}
+
 function safeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -186,6 +195,8 @@ export default function PresentationEditor() {
 
   const addParentRef = useRef(null);
   const mountedRef = useRef(true);
+  const activeSaveCountRef = useRef(0);
+  const operationLockRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -230,14 +241,14 @@ export default function PresentationEditor() {
             : DEFAULT_PREFERENCES;
 
         const normalizedBlocks = buildFlatTree(
-          Array.isArray(blockRows) ? blockRows : [],
+          uniqueById(blockRows),
         );
 
         if (!mountedRef.current) return;
 
         setPresentation(presentationRecord);
         setBlocks(normalizedBlocks);
-        setBlockTypes(Array.isArray(typeRows) ? typeRows : []);
+        setBlockTypes(uniqueById(typeRows));
         setPreferences({ ...DEFAULT_PREFERENCES, ...preference });
         setViewMode(
           presentationRecord.default_view_mode ||
@@ -307,8 +318,9 @@ export default function PresentationEditor() {
 
   const handleUpdateBlock = useCallback(
     async (blockId, updates) => {
-      if (!blockId || !updates || processing) return;
+      if (!blockId || !updates || typeof updates !== 'object') return;
 
+      activeSaveCountRef.current += 1;
       setSaveStatus('saving');
       setBlocksAndNormalize((current) =>
         current.map((block) =>
@@ -318,9 +330,11 @@ export default function PresentationEditor() {
 
       try {
         await base44.entities.PresentationBlock.update(blockId, updates);
-        setSaveStatus('saved');
+        activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+        if (activeSaveCountRef.current === 0) setSaveStatus('saved');
       } catch (error) {
         console.error('Erro ao salvar bloco:', error);
+        activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
         setSaveStatus('error');
         toast({
           title: 'Não foi possível salvar o bloco',
@@ -330,7 +344,7 @@ export default function PresentationEditor() {
         await loadEditor({ silent: true });
       }
     },
-    [loadEditor, processing, setBlocksAndNormalize, toast],
+    [loadEditor, setBlocksAndNormalize, toast],
   );
 
   const normalizeSiblingOrder = useCallback(
@@ -360,8 +374,9 @@ export default function PresentationEditor() {
   );
 
   const handleAddBlock = async (blockType, parentId = null) => {
-    if (!blockType?.id || processing) return;
+    if (!blockType?.id || operationLockRef.current) return;
 
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
 
@@ -404,6 +419,7 @@ export default function PresentationEditor() {
         variant: 'destructive',
       });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
@@ -415,8 +431,9 @@ export default function PresentationEditor() {
   };
 
   const handleDeleteBlock = async () => {
-    if (!deleteTarget || processing) return;
+    if (!deleteTarget || operationLockRef.current) return;
 
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
 
@@ -428,11 +445,9 @@ export default function PresentationEditor() {
         const descendantIds = getDescendantIds(blocks, deleteTarget.id);
         const idsToDelete = [...descendantIds.reverse(), deleteTarget.id];
 
-        await Promise.all(
-          idsToDelete.map((blockId) =>
-            base44.entities.PresentationBlock.delete(blockId),
-          ),
-        );
+        for (const blockId of idsToDelete) {
+          await base44.entities.PresentationBlock.delete(blockId);
+        }
 
         let nextBlocks = blocks.filter(
           (block) => !idsToDelete.includes(block.id),
@@ -486,6 +501,7 @@ export default function PresentationEditor() {
       });
       await loadEditor({ silent: true });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
@@ -536,10 +552,11 @@ export default function PresentationEditor() {
   );
 
   const handleDuplicate = async (blockId) => {
-    if (processing) return;
+    if (operationLockRef.current) return;
     const source = blocks.find((block) => block.id === blockId);
     if (!source) return;
 
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
 
@@ -564,12 +581,13 @@ export default function PresentationEditor() {
       });
       await loadEditor({ silent: true });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
 
   const moveBlock = async (blockId, direction) => {
-    if (processing) return;
+    if (operationLockRef.current) return;
     const currentBlock = blocks.find((block) => block.id === blockId);
     if (!currentBlock) return;
 
@@ -582,6 +600,7 @@ export default function PresentationEditor() {
     }
 
     const targetBlock = siblings[targetIndex];
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
 
@@ -616,6 +635,7 @@ export default function PresentationEditor() {
       });
       await loadEditor({ silent: true });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
@@ -624,7 +644,7 @@ export default function PresentationEditor() {
   const handleMoveDown = (blockId) => moveBlock(blockId, 1);
 
   const handleIndent = async (blockId) => {
-    if (processing) return;
+    if (operationLockRef.current) return;
     const block = blocks.find((item) => item.id === blockId);
     if (!block) return;
 
@@ -639,6 +659,7 @@ export default function PresentationEditor() {
       return;
     }
 
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
 
@@ -666,12 +687,13 @@ export default function PresentationEditor() {
       });
       await loadEditor({ silent: true });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
 
   const handleOutdent = async (blockId) => {
-    if (processing) return;
+    if (operationLockRef.current) return;
     const block = blocks.find((item) => item.id === blockId);
     if (!block?.parent_id) return;
 
@@ -685,6 +707,7 @@ export default function PresentationEditor() {
     );
     const targetOrder = parentPosition >= 0 ? parentPosition + 1 : destinationSiblings.length;
 
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
 
@@ -712,6 +735,7 @@ export default function PresentationEditor() {
       });
       await loadEditor({ silent: true });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
@@ -722,8 +746,9 @@ export default function PresentationEditor() {
   };
 
   const setAllCollapsed = async (isCollapsed) => {
-    if (processing || blocks.length === 0) return;
+    if (operationLockRef.current || blocks.length === 0) return;
 
+    operationLockRef.current = true;
     setProcessing(true);
     setSaveStatus('saving');
     setBlocksAndNormalize((current) =>
@@ -748,6 +773,7 @@ export default function PresentationEditor() {
       });
       await loadEditor({ silent: true });
     } finally {
+      operationLockRef.current = false;
       setProcessing(false);
     }
   };
