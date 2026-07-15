@@ -142,6 +142,14 @@ function normalizeText(value) {
     .trim();
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((item) => {
+    if (item?.id) map.set(item.id, item);
+  });
+  return [...map.values()];
+}
+
 function clampPercentage(value) {
   const number = Number(value) || 0;
   return Math.min(100, Math.max(0, Math.round(number)));
@@ -698,7 +706,7 @@ export default function Presentations() {
     setLoadError('');
 
     try {
-      const [presentationRows, typeRows, objectiveRows, sessionRows, tagRows, tagLinkRows] = await Promise.all([
+      const [presentationRows, typeRows, objectiveRows, sessionRows, tagRows] = await Promise.all([
         base44.entities.Presentation.filter(
           { user_id: user.id },
           '-updated_date',
@@ -720,16 +728,25 @@ export default function Presentations() {
           PAGE_LIMIT,
         ),
         base44.entities.Tag.filter({ user_id: user.id }, 'name', PAGE_LIMIT),
-        base44.entities.PresentationTag.filter({}, '-created_date', PAGE_LIMIT),
       ]);
 
-      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
-      setTypes(Array.isArray(typeRows) ? typeRows : []);
-      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
-      setSessions(Array.isArray(sessionRows) ? sessionRows : []);
-      setTags(Array.isArray(tagRows) ? tagRows : []);
-      const ownedPresentationIds = new Set((presentationRows || []).map((item) => item.id));
-      setPresentationTagLinks((Array.isArray(tagLinkRows) ? tagLinkRows : []).filter((item) => ownedPresentationIds.has(item.presentation_id)));
+      const ownedPresentations = uniqueById(presentationRows);
+      const tagLinkGroups = await Promise.all(
+        ownedPresentations.map((presentation) => (
+          base44.entities.PresentationTag.filter(
+            { presentation_id: presentation.id },
+            '-created_date',
+            PAGE_LIMIT,
+          )
+        )),
+      );
+
+      setPresentations(ownedPresentations);
+      setTypes(uniqueById(typeRows));
+      setObjectives(uniqueById(objectiveRows));
+      setSessions(uniqueById(sessionRows));
+      setTags(uniqueById(tagRows));
+      setPresentationTagLinks(uniqueById(tagLinkGroups.flat()));
     } catch (error) {
       console.error('Erro ao carregar apresentações:', error);
       setLoadError('Não foi possível carregar suas apresentações.');
@@ -1025,6 +1042,7 @@ export default function Presentations() {
     if (!presentation?.id || busyAction || !user?.id) return;
 
     setBusyAction({ type: 'duplicate', presentationId: presentation.id });
+    let duplicatedPresentation = null;
 
     try {
       const originalBlocks = await base44.entities.PresentationBlock.filter(
@@ -1034,7 +1052,7 @@ export default function Presentations() {
       );
 
       const cleanPresentation = removeSystemFields(presentation);
-      const duplicatedPresentation = await base44.entities.Presentation.create({
+      duplicatedPresentation = await base44.entities.Presentation.create({
         ...cleanPresentation,
         user_id: user.id,
         title: `${presentation.title || 'Apresentação'} (cópia)`,
@@ -1076,6 +1094,25 @@ export default function Presentations() {
       });
     } catch (error) {
       console.error('Erro ao duplicar apresentação:', error);
+
+      if (duplicatedPresentation?.id) {
+        try {
+          const partialBlocks = await base44.entities.PresentationBlock.filter(
+            { presentation_id: duplicatedPresentation.id },
+            'order_index',
+            PAGE_LIMIT,
+          );
+          await Promise.allSettled(
+            (partialBlocks || []).map((block) => (
+              block?.id ? base44.entities.PresentationBlock.delete(block.id) : null
+            )),
+          );
+          await base44.entities.Presentation.delete(duplicatedPresentation.id);
+        } catch (rollbackError) {
+          console.error('Erro ao remover cópia incompleta:', rollbackError);
+        }
+      }
+
       toast({
         title: 'Não foi possível duplicar',
         description: 'A apresentação original não foi alterada.',
