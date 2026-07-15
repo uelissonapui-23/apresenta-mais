@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -173,6 +173,122 @@ function hasAnswer(value) {
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'boolean') return true;
   return String(value ?? '').trim().length > 0;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortDeepestFirst(blocks) {
+  return [...blocks].sort((left, right) => {
+    const depthDifference = (
+      Number(right?.depth_level || 0)
+      - Number(left?.depth_level || 0)
+    );
+
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return Number(right?.order_index || 0) - Number(left?.order_index || 0);
+  });
+}
+
+function buildBlockBackup(blocks) {
+  return uniqueById(blocks).map((block) => ({
+    original_id: block.id,
+    original_parent_id: block.parent_id || null,
+    presentation_id: block.presentation_id,
+    block_type_id: block.block_type_id || null,
+    title: block.title || 'Tópico sem título',
+    summary: block.summary || '',
+    content: block.content || '',
+    additional_content: block.additional_content || '',
+    presenter_notes: block.presenter_notes || '',
+    order_index: Number(block.order_index) || 0,
+    depth_level: Number(block.depth_level) || 0,
+    importance_level: Number(block.importance_level) || 3,
+    estimated_duration_seconds: Number(block.estimated_duration_seconds) || 60,
+    is_essential: Boolean(block.is_essential),
+    is_hidden: Boolean(block.is_hidden),
+    is_collapsed: Boolean(block.is_collapsed),
+    show_to_audience: block.show_to_audience !== false,
+    icon: block.icon || '',
+    background_style: block.background_style || '',
+    text_style: block.text_style || '',
+  }));
+}
+
+async function restoreBlockBackup(backupRows) {
+  const pending = [...backupRows].sort((left, right) => {
+    const depthDifference = (
+      Number(left.depth_level || 0)
+      - Number(right.depth_level || 0)
+    );
+
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return Number(left.order_index || 0) - Number(right.order_index || 0);
+  });
+
+  const idMap = new Map();
+  let safety = pending.length + 1;
+
+  while (pending.length > 0 && safety > 0) {
+    safety -= 1;
+    let createdInPass = 0;
+
+    for (let index = pending.length - 1; index >= 0; index -= 1) {
+      const row = pending[index];
+      const parentReady = (
+        !row.original_parent_id
+        || idMap.has(row.original_parent_id)
+      );
+
+      if (!parentReady) {
+        continue;
+      }
+
+      const {
+        original_id,
+        original_parent_id,
+        ...payload
+      } = row;
+
+      const created = await base44.entities.PresentationBlock.create({
+        ...payload,
+        parent_id: original_parent_id
+          ? idMap.get(original_parent_id)
+          : null,
+      });
+
+      if (!created?.id) {
+        throw new Error('A restauração não retornou o ID de um bloco.');
+      }
+
+      idMap.set(original_id, created.id);
+      pending.splice(index, 1);
+      createdInPass += 1;
+    }
+
+    if (createdInPass === 0) {
+      throw new Error('Não foi possível reconstruir a hierarquia anterior.');
+    }
+  }
+
+  if (pending.length > 0) {
+    throw new Error('A restauração da estrutura ficou incompleta.');
+  }
 }
 
 function compareCondition(actual, operator, expected) {
@@ -418,6 +534,8 @@ export default function GuidedCreation() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const saveLockRef = useRef(false);
+  const generateLockRef = useRef(false);
   const [error, setError] = useState('');
   const [replaceDialogOpen, setReplaceDialogOpen] = useState(false);
 
@@ -448,7 +566,10 @@ export default function GuidedCreation() {
         { active: true },
         '-version',
       );
-      const selectedFlow = selectBestFlow(allActiveFlows, presentationData);
+      const selectedFlow = selectBestFlow(
+        uniqueById(allActiveFlows),
+        presentationData,
+      );
       setFlow(selectedFlow);
 
       let questionRows = [];
@@ -459,17 +580,23 @@ export default function GuidedCreation() {
         );
       }
 
-      const effectiveQuestions = questionRows?.length
-        ? questionRows
+      const normalizedQuestions = uniqueById(questionRows);
+
+      const effectiveQuestions = normalizedQuestions.length
+        ? normalizedQuestions
         : FALLBACK_QUESTIONS;
       setQuestions(effectiveQuestions);
 
-      const usingFallback = !questionRows?.length;
+      const usingFallback = normalizedQuestions.length === 0;
       const existingAnswers = usingFallback
         ? []
-        : await base44.entities.GuidedAnswer.filter({ presentation_id: id });
+        : uniqueById(
+            await base44.entities.GuidedAnswer.filter({
+              presentation_id: id,
+            }),
+          );
 
-      setSavedAnswers(existingAnswers || []);
+      setSavedAnswers(existingAnswers);
 
       const answerMap = {};
       (existingAnswers || []).forEach((item) => {
@@ -549,8 +676,15 @@ export default function GuidedCreation() {
   };
 
   const saveAnswers = async ({ showToast = false } = {}) => {
-    if (!id || !presentation) return;
+    if (
+      !id
+      || !presentation
+      || saveLockRef.current
+    ) {
+      return;
+    }
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
@@ -635,6 +769,7 @@ export default function GuidedCreation() {
       });
       throw saveError;
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
@@ -731,50 +866,46 @@ export default function GuidedCreation() {
   };
 
   const createGeneratedBlocks = async ({ replaceExisting = false } = {}) => {
+    if (generateLockRef.current || generating) {
+      return;
+    }
+
+    generateLockRef.current = true;
     setGenerating(true);
 
     try {
       await saveAnswers();
 
-      const existingBlocks = await base44.entities.PresentationBlock.filter({ presentation_id: id });
-      if (existingBlocks?.length > 0 && !replaceExisting) {
+      const existingBlocks = uniqueById(
+        await base44.entities.PresentationBlock.filter({
+          presentation_id: id,
+        }),
+      );
+
+      if (existingBlocks.length > 0 && !replaceExisting) {
         setReplaceDialogOpen(true);
         return;
       }
 
-      const blockTypes = await base44.entities.BlockType.filter({ active: true }, 'order_index');
-      const blocks = buildBlocks(blockTypes || []);
+      const blockTypes = uniqueById(
+        await base44.entities.BlockType.filter(
+          { active: true },
+          'order_index',
+        ),
+      );
+
+      const blocks = buildBlocks(blockTypes);
 
       if (!blocks.length) {
         throw new Error('Nenhum tipo de bloco ativo foi encontrado.');
       }
 
-      let removedBlocksBackup = [];
+      const removedBlocksBackup = replaceExisting
+        ? buildBlockBackup(existingBlocks)
+        : [];
 
-      if (replaceExisting && existingBlocks?.length > 0) {
-        removedBlocksBackup = existingBlocks.map((block) => ({
-          presentation_id: block.presentation_id,
-          parent_id: block.parent_id || null,
-          block_type_id: block.block_type_id || null,
-          title: block.title || 'Tópico sem título',
-          summary: block.summary || '',
-          content: block.content || '',
-          additional_content: block.additional_content || '',
-          presenter_notes: block.presenter_notes || '',
-          order_index: Number(block.order_index) || 0,
-          depth_level: Number(block.depth_level) || 0,
-          importance_level: Number(block.importance_level) || 3,
-          estimated_duration_seconds: Number(block.estimated_duration_seconds) || 60,
-          is_essential: Boolean(block.is_essential),
-          is_hidden: Boolean(block.is_hidden),
-          is_collapsed: Boolean(block.is_collapsed),
-          show_to_audience: block.show_to_audience !== false,
-          icon: block.icon || '',
-          background_style: block.background_style || '',
-          text_style: block.text_style || '',
-        }));
-
-        for (const block of existingBlocks) {
+      if (replaceExisting && existingBlocks.length > 0) {
+        for (const block of sortDeepestFirst(existingBlocks)) {
           await base44.entities.PresentationBlock.delete(block.id);
         }
       }
@@ -784,13 +915,35 @@ export default function GuidedCreation() {
       } catch (blockCreationError) {
         if (removedBlocksBackup.length > 0) {
           try {
-            await base44.entities.PresentationBlock.bulkCreate(removedBlocksBackup);
+            const partiallyCreated = uniqueById(
+              await base44.entities.PresentationBlock.filter({
+                presentation_id: id,
+              }),
+            );
+
+            for (const block of sortDeepestFirst(partiallyCreated)) {
+              await base44.entities.PresentationBlock.delete(block.id);
+            }
+
+            await restoreBlockBackup(removedBlocksBackup);
           } catch (restoreError) {
-            console.error('Erro ao restaurar estrutura anterior:', restoreError);
+            console.error(
+              'Erro ao restaurar a estrutura anterior:',
+              restoreError,
+            );
+
+            toast({
+              title: 'A estrutura anterior precisa de atenção',
+              description:
+                'A nova estrutura falhou e a restauração automática não foi concluída. Não feche esta página antes de conferir o editor.',
+              variant: 'destructive',
+            });
           }
         }
+
         throw blockCreationError;
       }
+
       await base44.entities.Presentation.update(id, {
         status: 'draft',
         progress_percentage: 0,
@@ -800,18 +953,29 @@ export default function GuidedCreation() {
       window.localStorage.removeItem(storageKey);
 
       toast({
-        title: replaceExisting ? 'Estrutura recriada' : 'Estrutura criada',
-        description: `${blocks.length} bloco${blocks.length === 1 ? '' : 's'} foram enviados ao editor.`,
+        title: replaceExisting
+          ? 'Estrutura recriada'
+          : 'Estrutura criada',
+        description:
+          `${blocks.length} bloco${blocks.length === 1 ? '' : 's'} foram enviados ao editor.`,
       });
+
       navigate(`/presentations/${id}/editor`);
     } catch (generateError) {
-      console.error('Erro ao gerar estrutura:', generateError);
+      console.error(
+        'Erro ao gerar estrutura:',
+        generateError,
+      );
+
       toast({
         title: 'Não foi possível gerar a estrutura',
-        description: generateError.message || 'Revise as respostas e tente novamente.',
+        description:
+          generateError.message
+          || 'Revise as respostas e tente novamente.',
         variant: 'destructive',
       });
     } finally {
+      generateLockRef.current = false;
       setGenerating(false);
     }
   };
