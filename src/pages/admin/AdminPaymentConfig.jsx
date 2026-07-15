@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -31,6 +31,58 @@ const KEY_TYPES = [
   { value: 'phone', label: 'Telefone' },
   { value: 'random', label: 'Chave aleatória' },
 ];
+
+const DEFAULT_CONFIG = {
+  pix_enabled: false,
+  pix_key: '',
+  pix_key_type: 'random',
+  recipient_name: '',
+  recipient_document: '',
+  bank_name: '',
+  instructions: '',
+  support_instructions: '',
+  plan_payment_instructions: '',
+  minimum_support_amount: 0,
+  suggested_amounts: '10, 25, 50, 100',
+  proof_required: true,
+  active: true,
+};
+
+function normalizeSuggestedAmounts(value) {
+  const uniqueValues = [...new Set(
+    String(value || '')
+      .split(',')
+      .map((item) => Number(String(item).trim().replace(',', '.')))
+      .filter((item) => Number.isFinite(item) && item > 0)
+      .map((item) => Math.round(item * 100) / 100),
+  )];
+
+  return uniqueValues.sort((a, b) => a - b).join(', ');
+}
+
+function validatePixKey(type, rawValue) {
+  const value = String(rawValue || '').trim();
+  if (!value) return false;
+
+  if (type === 'email') {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  }
+
+  if (type === 'phone') {
+    const digits = value.replace(/\D/g, '');
+    return digits.length >= 10 && digits.length <= 13;
+  }
+
+  if (type === 'cpf') {
+    return value.replace(/\D/g, '').length === 11;
+  }
+
+  if (type === 'cnpj') {
+    return value.replace(/\D/g, '').length === 14;
+  }
+
+  return value.length >= 8;
+}
 
 function LoadingState() {
   return (
@@ -65,6 +117,7 @@ export default function AdminPaymentConfig() {
   const [config, setConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const saveLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!isAdmin) {
@@ -75,8 +128,17 @@ export default function AdminPaymentConfig() {
     if (!silent) setLoading(true);
 
     try {
-      const rows = await base44.entities.PaymentConfiguration.filter({ active: true }, '-updated_date', 5);
-      setConfig(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
+      const rows = await base44.entities.PaymentConfiguration.filter(
+        { active: true },
+        '-updated_date',
+        20,
+      );
+
+      const validRows = Array.isArray(rows)
+        ? rows.filter((row) => row?.id)
+        : [];
+
+      setConfig(validRows.length > 0 ? validRows[0] : { ...DEFAULT_CONFIG });
     } catch {
       toast({ title: 'Falha ao carregar', variant: 'destructive' });
     } finally {
@@ -93,39 +155,88 @@ export default function AdminPaymentConfig() {
   };
 
   const handleSave = async () => {
-    if (!config || saving) return;
+    if (!config || saving || saveLockRef.current) return;
 
+    const pixKeyType = config.pix_key_type || 'random';
+    const pixKey = String(config.pix_key || '').trim();
+    const recipientName = String(config.recipient_name || '').trim();
+    const minimumSupportAmount = Number(config.minimum_support_amount) || 0;
+    const suggestedAmounts = normalizeSuggestedAmounts(config.suggested_amounts);
+
+    if (minimumSupportAmount < 0) {
+      toast({
+        title: 'Valor mínimo inválido',
+        description: 'O valor mínimo de apoio não pode ser negativo.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (config.pix_enabled) {
+      if (!recipientName) {
+        toast({
+          title: 'Informe o recebedor',
+          description: 'O nome do recebedor é obrigatório para ativar o PIX.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (!validatePixKey(pixKeyType, pixKey)) {
+        toast({
+          title: 'Chave PIX inválida',
+          description: 'Revise o tipo e o valor da chave antes de ativar o PIX.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
       const payload = {
         pix_enabled: !!config.pix_enabled,
-        pix_key: config.pix_key || '',
-        pix_key_type: config.pix_key_type || 'random',
-        recipient_name: config.recipient_name || '',
-        recipient_document: config.recipient_document || '',
-        bank_name: config.bank_name || '',
-        instructions: config.instructions || '',
-        support_instructions: config.support_instructions || '',
-        plan_payment_instructions: config.plan_payment_instructions || '',
-        minimum_support_amount: Number(config.minimum_support_amount) || 0,
-        suggested_amounts: config.suggested_amounts || '',
+        pix_key: pixKey,
+        pix_key_type: pixKeyType,
+        recipient_name: recipientName,
+        recipient_document: String(config.recipient_document || '').trim(),
+        bank_name: String(config.bank_name || '').trim(),
+        instructions: String(config.instructions || '').trim(),
+        support_instructions: String(config.support_instructions || '').trim(),
+        plan_payment_instructions: String(config.plan_payment_instructions || '').trim(),
+        minimum_support_amount: minimumSupportAmount,
+        suggested_amounts: suggestedAmounts,
         proof_required: config.proof_required !== false,
         active: true,
         updated_by_user_id: user?.id || '',
       };
 
+      let saved;
+
       if (config.id) {
-        await base44.entities.PaymentConfiguration.update(config.id, payload);
+        saved = await base44.entities.PaymentConfiguration.update(config.id, payload);
       } else {
-        const created = await base44.entities.PaymentConfiguration.create(payload);
-        setConfig(created);
+        saved = await base44.entities.PaymentConfiguration.create(payload);
       }
 
+      setConfig({
+        ...DEFAULT_CONFIG,
+        ...payload,
+        ...(saved || {}),
+      });
+
       toast({ title: 'Configuração salva' });
-    } catch {
-      toast({ title: 'Não foi possível salvar', variant: 'destructive' });
+    } catch (error) {
+      console.error('Erro ao salvar configuração PIX:', error);
+      toast({
+        title: 'Não foi possível salvar',
+        description: 'Revise os dados e tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
@@ -149,7 +260,11 @@ export default function AdminPaymentConfig() {
           </p>
         </div>
 
-        <Button variant="outline" onClick={() => loadData({ silent: true })}>
+        <Button
+          variant="outline"
+          onClick={() => loadData({ silent: true })}
+          disabled={saving}
+        >
           <RefreshCw className="mr-2 h-4 w-4" />
           Atualizar
         </Button>
@@ -228,11 +343,25 @@ export default function AdminPaymentConfig() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label>Valor mínimo de apoio</Label>
-              <Input type="number" min="0" step="0.01" value={config?.minimum_support_amount ?? 0} onChange={(e) => update('minimum_support_amount', e.target.value)} />
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={config?.minimum_support_amount ?? 0}
+                onChange={(e) => update('minimum_support_amount', e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label>Valores sugeridos (separados por vírgula)</Label>
-              <Input value={config?.suggested_amounts || ''} onChange={(e) => update('suggested_amounts', e.target.value)} placeholder="10, 25, 50, 100" />
+              <Input
+                value={config?.suggested_amounts || ''}
+                onChange={(e) => update('suggested_amounts', e.target.value)}
+                onBlur={() => update(
+                  'suggested_amounts',
+                  normalizeSuggestedAmounts(config?.suggested_amounts),
+                )}
+                placeholder="10, 25, 50, 100"
+              />
             </div>
           </div>
 
@@ -246,7 +375,7 @@ export default function AdminPaymentConfig() {
             <Switch checked={config?.proof_required !== false} onCheckedChange={(v) => update('proof_required', v)} />
           </div>
 
-          <Button onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving || !config}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Salvar configuração
           </Button>
