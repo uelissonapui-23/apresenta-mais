@@ -92,6 +92,14 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function uniqueById(items) {
+  const map = new Map();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    if (item?.id) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
 function formatTime(totalSeconds) {
   const safe = Math.max(0, Math.floor(toNumber(totalSeconds)));
   const hours = Math.floor(safe / 3600);
@@ -199,6 +207,7 @@ export default function Rehearsal() {
 
   const mountedRef = useRef(true);
   const saveInFlightRef = useRef(false);
+  const operationInFlightRef = useRef(false);
 
   const visibleBlocks = useMemo(
     () => sortBlocks(blocks.filter((block) => block.is_hidden !== true)),
@@ -280,9 +289,21 @@ export default function Rehearsal() {
 
       if (!mountedRef.current) return;
 
-      const safeBlocks = Array.isArray(blockRows) ? blockRows : [];
-      const safeSessions = Array.isArray(sessionRows) ? sessionRows : [];
-      const safePreferences = Array.isArray(preferenceRows) ? preferenceRows : [];
+      if (!presentationData) {
+        setLoadError('Esta apresentação não foi encontrada.');
+        return;
+      }
+
+      if (presentationData.user_id && presentationData.user_id !== user.id) {
+        setLoadError('Você não tem permissão para ensaiar esta apresentação.');
+        return;
+      }
+
+      const safeBlocks = uniqueById(blockRows).filter(
+        (block) => !block.presentation_id || block.presentation_id === id,
+      );
+      const safeSessions = uniqueById(sessionRows);
+      const safePreferences = uniqueById(preferenceRows);
       const savedPreference = safePreferences[0] || {};
 
       setPreferences({
@@ -424,7 +445,7 @@ export default function Rehearsal() {
   }, [existingSession?.id]);
 
   const startNewSession = useCallback(async ({ restart = false } = {}) => {
-    if (!user?.id) return;
+    if (!user?.id || operationInFlightRef.current) return;
 
     if (visibleBlocks.length === 0) {
       toast({
@@ -435,7 +456,9 @@ export default function Rehearsal() {
       return;
     }
 
+    operationInFlightRef.current = true;
     setSaving(true);
+    let createdSessionId = null;
 
     try {
       if (restart) {
@@ -459,6 +482,7 @@ export default function Rehearsal() {
         notes: '',
       });
 
+      createdSessionId = newSession.id;
       const rows = await createProgressRows(newSession.id);
 
       setSession(newSession);
@@ -476,12 +500,22 @@ export default function Rehearsal() {
       });
     } catch (error) {
       console.error('Erro ao iniciar ensaio:', error);
+
+      if (createdSessionId) {
+        try {
+          await base44.entities.PresentationSession.delete(createdSessionId);
+        } catch (rollbackError) {
+          console.error('Erro ao remover sessão incompleta:', rollbackError);
+        }
+      }
+
       toast({
         title: 'Não foi possível iniciar',
         description: 'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
     } finally {
+      operationInFlightRef.current = false;
       setSaving(false);
     }
   }, [createProgressRows, finishExistingSession, id, plannedSeconds, toast, user?.id, visibleBlocks]);
@@ -505,8 +539,33 @@ export default function Rehearsal() {
         { session_id: existingSession.id },
         'order_used',
       );
-      const safeRows = Array.isArray(rows) ? rows : [];
-      const currentRow = safeRows.find((row) => row.status === 'current');
+      const validBlockIds = new Set(visibleBlocks.map((block) => block.id));
+      const safeRows = uniqueById(rows).filter((row) => validBlockIds.has(row.block_id));
+      const existingBlockIds = new Set(safeRows.map((row) => row.block_id));
+      const missingPayload = visibleBlocks
+        .filter((block) => !existingBlockIds.has(block.id))
+        .map((block, index) => ({
+          session_id: existingSession.id,
+          block_id: block.id,
+          status: 'pending',
+          order_used: safeRows.length + index,
+          visit_count: 0,
+          started_at: null,
+        }));
+
+      let missingRows = [];
+      if (missingPayload.length > 0) {
+        if (typeof base44.entities.SessionBlockProgress.bulkCreate === 'function') {
+          missingRows = await base44.entities.SessionBlockProgress.bulkCreate(missingPayload);
+        } else {
+          missingRows = await Promise.all(
+            missingPayload.map((item) => base44.entities.SessionBlockProgress.create(item)),
+          );
+        }
+      }
+
+      const normalizedRows = [...safeRows, ...uniqueById(missingRows)];
+      const currentRow = normalizedRows.find((row) => row.status === 'current');
       const currentId = currentRow?.block_id || existingSession.current_block_id;
       const index = Math.max(
         0,
@@ -514,7 +573,7 @@ export default function Rehearsal() {
       );
 
       setSession(existingSession);
-      setProgressRows(safeRows);
+      setProgressRows(normalizedRows);
       setCurrentIndex(index);
       setElapsedSeconds(toNumber(existingSession.elapsed_seconds));
       setIsRunning(existingSession.status === 'active');
@@ -589,18 +648,32 @@ export default function Rehearsal() {
   }, [progressRows, session?.id, updateProgressRow, visibleBlocks]);
 
   const moveToNext = useCallback(async ({ status = 'completed' } = {}) => {
-    if (!currentBlock) return;
+    if (!currentBlock || operationInFlightRef.current) return;
 
-    await updateProgressRow(currentBlock.id, status);
+    operationInFlightRef.current = true;
+    setSaving(true);
+    try {
+      await updateProgressRow(currentBlock.id, status);
 
-    if (currentIndex < visibleBlocks.length - 1) {
-      await setOnlyCurrentBlock(currentIndex + 1);
-      return;
+      if (currentIndex < visibleBlocks.length - 1) {
+        await setOnlyCurrentBlock(currentIndex + 1);
+        return;
+      }
+
+      await saveSessionSnapshot({ force: true });
+      setShowEndDialog(true);
+    } catch (error) {
+      console.error('Erro ao avançar no ensaio:', error);
+      toast({
+        title: 'Não foi possível avançar',
+        description: 'Seu tópico atual foi mantido. Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      operationInFlightRef.current = false;
+      setSaving(false);
     }
-
-    await saveSessionSnapshot({ force: true });
-    setShowEndDialog(true);
-  }, [currentBlock, currentIndex, saveSessionSnapshot, setOnlyCurrentBlock, updateProgressRow, visibleBlocks.length]);
+  }, [currentBlock, currentIndex, saveSessionSnapshot, setOnlyCurrentBlock, toast, updateProgressRow, visibleBlocks.length]);
 
   const advanceUsingPreference = useCallback(async () => {
     await moveToNext({
@@ -609,9 +682,23 @@ export default function Rehearsal() {
   }, [moveToNext, preferences.auto_mark_completed]);
 
   const moveToPrevious = useCallback(async () => {
-    if (currentIndex <= 0) return;
-    await setOnlyCurrentBlock(currentIndex - 1);
-  }, [currentIndex, setOnlyCurrentBlock]);
+    if (currentIndex <= 0 || operationInFlightRef.current) return;
+    operationInFlightRef.current = true;
+    setSaving(true);
+    try {
+      await setOnlyCurrentBlock(currentIndex - 1);
+    } catch (error) {
+      console.error('Erro ao voltar no ensaio:', error);
+      toast({
+        title: 'Não foi possível voltar',
+        description: 'Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      operationInFlightRef.current = false;
+      setSaving(false);
+    }
+  }, [currentIndex, setOnlyCurrentBlock, toast]);
 
   const markCurrent = useCallback(async (status) => {
     if (!currentBlock) return;
@@ -619,47 +706,78 @@ export default function Rehearsal() {
   }, [currentBlock, updateProgressRow]);
 
   const pauseSession = useCallback(async () => {
+    if (!session?.id || operationInFlightRef.current) return;
+
+    operationInFlightRef.current = true;
+    setSaving(true);
+    const wasRunning = isRunning;
     setIsRunning(false);
 
-    if (!session?.id) return;
+    try {
+      const now = new Date().toISOString();
+      await base44.entities.PresentationSession.update(session.id, {
+        status: 'paused',
+        paused_at: now,
+        elapsed_seconds: elapsedSeconds,
+        current_block_id: currentBlock?.id || null,
+        completed_count: completedCount,
+        skipped_count: skippedCount,
+      });
 
-    const now = new Date().toISOString();
-    await base44.entities.PresentationSession.update(session.id, {
-      status: 'paused',
-      paused_at: now,
-      elapsed_seconds: elapsedSeconds,
-      current_block_id: currentBlock?.id || null,
-      completed_count: completedCount,
-      skipped_count: skippedCount,
-    });
-
-    setSession((previous) => previous ? {
-      ...previous,
-      status: 'paused',
-      paused_at: now,
-      elapsed_seconds: elapsedSeconds,
-    } : previous);
-  }, [completedCount, currentBlock?.id, elapsedSeconds, session?.id, skippedCount]);
+      setSession((previous) => previous ? {
+        ...previous,
+        status: 'paused',
+        paused_at: now,
+        elapsed_seconds: elapsedSeconds,
+      } : previous);
+    } catch (error) {
+      console.error('Erro ao pausar ensaio:', error);
+      setIsRunning(wasRunning);
+      toast({
+        title: 'Não foi possível pausar',
+        description: 'Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      operationInFlightRef.current = false;
+      setSaving(false);
+    }
+  }, [completedCount, currentBlock?.id, elapsedSeconds, isRunning, session?.id, skippedCount, toast]);
 
   const resumeSession = useCallback(async () => {
-    if (!session?.id) return;
+    if (!session?.id || operationInFlightRef.current) return;
 
-    await base44.entities.PresentationSession.update(session.id, {
-      status: 'active',
-      paused_at: null,
-    });
+    operationInFlightRef.current = true;
+    setSaving(true);
+    try {
+      await base44.entities.PresentationSession.update(session.id, {
+        status: 'active',
+        paused_at: null,
+      });
 
-    setSession((previous) => previous ? {
-      ...previous,
-      status: 'active',
-      paused_at: null,
-    } : previous);
-    setIsRunning(true);
-  }, [session?.id]);
+      setSession((previous) => previous ? {
+        ...previous,
+        status: 'active',
+        paused_at: null,
+      } : previous);
+      setIsRunning(true);
+    } catch (error) {
+      console.error('Erro ao retomar ensaio:', error);
+      toast({
+        title: 'Não foi possível retomar',
+        description: 'Tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      operationInFlightRef.current = false;
+      setSaving(false);
+    }
+  }, [session?.id, toast]);
 
   const endSession = useCallback(async () => {
-    if (!session?.id) return;
+    if (!session?.id || operationInFlightRef.current) return;
 
+    operationInFlightRef.current = true;
     setSaving(true);
 
     try {
@@ -691,6 +809,7 @@ export default function Rehearsal() {
         variant: 'destructive',
       });
     } finally {
+      operationInFlightRef.current = false;
       setSaving(false);
     }
   }, [completedCount, currentBlock?.id, elapsedSeconds, finalNotes, id, navigate, progressPercentage, session?.id, skippedCount, toast]);
