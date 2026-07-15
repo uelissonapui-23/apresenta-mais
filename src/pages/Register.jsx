@@ -671,3 +671,888 @@ function VerificationStep({
     </AuthLayout>
   );
 }
+export default function Register() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { toast } = useToast();
+
+  const {
+    user,
+    profile,
+    loading: userLoading,
+    refreshAuth,
+  } = useCurrentUser();
+
+  const redirectHandledRef = useRef(false);
+
+  const [step, setStep] = useState('register');
+
+  const [form, setForm] = useState({
+    email: '',
+    password: '',
+    confirmPassword: '',
+  });
+
+  const [otpCode, setOtpCode] = useState('');
+
+  const [acceptTerms, setAcceptTerms] = useState(false);
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
+
+  const [resendSeconds, setResendSeconds] = useState(0);
+
+  const [error, setError] = useState('');
+
+  const requestedRoute = useMemo(() => {
+    const routeFromState = location.state?.from;
+
+    if (isSafeInternalRoute(routeFromState)) {
+      return routeFromState;
+    }
+
+    const routeFromSession = safeSessionGet(
+      REDIRECT_AFTER_LOGIN_KEY,
+    );
+
+    if (isSafeInternalRoute(routeFromSession)) {
+      return routeFromSession;
+    }
+
+    return null;
+  }, [location.state]);
+
+  const normalizedEmail = useMemo(
+    () => normalizeEmail(form.email),
+    [form.email],
+  );
+
+  const passwordChecks = useMemo(
+    () => getPasswordChecks(form.password),
+    [form.password],
+  );
+
+  const passwordStrength = useMemo(
+    () => getPasswordStrength(form.password),
+    [form.password],
+  );
+
+  const passwordsMatch = (
+    Boolean(form.confirmPassword)
+    && form.password === form.confirmPassword
+  );
+
+  const canSubmit = useMemo(
+    () => (
+      isValidEmail(normalizedEmail)
+      && isStrongEnough(form.password)
+      && passwordsMatch
+      && acceptTerms
+      && !submitting
+      && !googleLoading
+    ),
+    [
+      acceptTerms,
+      form.password,
+      googleLoading,
+      normalizedEmail,
+      passwordsMatch,
+      submitting,
+    ],
+  );
+
+  useEffect(() => {
+    const savedEmail = safeSessionGet(
+      REGISTER_EMAIL_KEY,
+    );
+
+    if (savedEmail) {
+      setForm((current) => ({
+        ...current,
+        email: savedEmail,
+      }));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (resendSeconds <= 0) {
+      return undefined;
+    }
+
+    const timerId = window.setInterval(() => {
+      setResendSeconds((current) => (
+        Math.max(0, current - 1)
+      ));
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timerId);
+    };
+  }, [resendSeconds]);
+
+  useEffect(() => {
+    if (
+      userLoading
+      || !user
+      || redirectHandledRef.current
+    ) {
+      return;
+    }
+
+    redirectHandledRef.current = true;
+
+    if (
+      !profile
+      || profile.onboarding_completed !== true
+    ) {
+      navigate('/onboarding', {
+        replace: true,
+      });
+
+      return;
+    }
+
+    if (profile.active === false) {
+      return;
+    }
+
+    safeSessionRemove(
+      REDIRECT_AFTER_LOGIN_KEY,
+    );
+
+    navigate(
+      requestedRoute || '/',
+      {
+        replace: true,
+      },
+    );
+  }, [
+    navigate,
+    profile,
+    requestedRoute,
+    user,
+    userLoading,
+  ]);
+
+  const handleFieldChange = (field) => (event) => {
+    const value = event.target.value;
+
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+
+    if (error) {
+      setError('');
+    }
+  };
+
+  const handleRegister = async (event) => {
+    event.preventDefault();
+
+    if (
+      submitting
+      || googleLoading
+    ) {
+      return;
+    }
+
+    setError('');
+
+    if (!isValidEmail(normalizedEmail)) {
+      setError(
+        'Informe um endereço de e-mail válido.',
+      );
+
+      return;
+    }
+
+    if (!isStrongEnough(form.password)) {
+      setError(
+        'A senha precisa ter pelo menos 8 caracteres, '
+        + 'letra maiúscula, letra minúscula e número.',
+      );
+
+      return;
+    }
+
+    if (form.password !== form.confirmPassword) {
+      setError(
+        'A confirmação da senha não corresponde.',
+      );
+
+      return;
+    }
+
+    if (!acceptTerms) {
+      setError(
+        'Leia e aceite os Termos de Uso e a Política de Privacidade.',
+      );
+
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const result = await base44.auth.register({
+        email: normalizedEmail,
+        password: form.password,
+      });
+
+      safeSessionSet(
+        REGISTER_EMAIL_KEY,
+        normalizedEmail,
+      );
+
+      /*
+      |--------------------------------------------------------------------------
+      | Algumas versões do SDK podem concluir o cadastro sem exigir OTP
+      |--------------------------------------------------------------------------
+      */
+
+      const verificationRequired = (
+        result?.verification_required !== false
+        && result?.email_verified !== true
+        && result?.user?.email_verified !== true
+      );
+
+      if (!verificationRequired) {
+        try {
+          await base44.auth.loginViaEmailPassword(
+            normalizedEmail,
+            form.password,
+          );
+        } catch (loginError) {
+          console.warn(
+            'Conta criada, mas o login automático não foi concluído:',
+            loginError,
+          );
+        }
+
+        try {
+          await refreshAuth?.();
+        } catch (refreshError) {
+          console.warn(
+            'Não foi possível atualizar a sessão imediatamente:',
+            refreshError,
+          );
+        }
+
+        safeSessionRemove(
+          REGISTER_EMAIL_KEY,
+        );
+
+        window.location.assign('/onboarding');
+        return;
+      }
+
+      setOtpCode('');
+      setResendSeconds(
+        RESEND_COOLDOWN_SECONDS,
+      );
+      setStep('verification');
+
+      toast({
+        title: 'Código enviado',
+        description:
+          'Confira sua caixa de entrada para confirmar o cadastro.',
+      });
+    } catch (registerError) {
+      console.error(
+        'Erro ao criar conta:',
+        registerError,
+      );
+
+      setError(
+        getFriendlyRegisterError(registerError),
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleVerifyOtp = async (event) => {
+    event.preventDefault();
+
+    if (
+      verifying
+      || resending
+    ) {
+      return;
+    }
+
+    setError('');
+
+    if (otpCode.length !== OTP_LENGTH) {
+      setError(
+        `Informe o código de ${OTP_LENGTH} dígitos.`,
+      );
+
+      return;
+    }
+
+    setVerifying(true);
+
+    try {
+      await base44.auth.verifyOtp({
+        email: normalizedEmail,
+        otp: otpCode,
+        code: otpCode,
+      });
+
+      /*
+      |--------------------------------------------------------------------------
+      | Entrar automaticamente depois da confirmação
+      |--------------------------------------------------------------------------
+      */
+
+      await base44.auth.loginViaEmailPassword(
+        normalizedEmail,
+        form.password,
+      );
+
+      try {
+        await refreshAuth?.();
+      } catch (refreshError) {
+        console.warn(
+          'O e-mail foi confirmado, mas o contexto não pôde ser atualizado imediatamente:',
+          refreshError,
+        );
+      }
+
+      safeSessionRemove(
+        REGISTER_EMAIL_KEY,
+      );
+
+      const destination = '/onboarding';
+
+      window.location.assign(destination);
+    } catch (verificationError) {
+      console.error(
+        'Erro ao verificar código:',
+        verificationError,
+      );
+
+      setError(
+        getFriendlyOtpError(verificationError),
+      );
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (
+      resending
+      || verifying
+      || resendSeconds > 0
+    ) {
+      return;
+    }
+
+    setError('');
+    setResending(true);
+
+    try {
+      await base44.auth.resendOtp({
+        email: normalizedEmail,
+      });
+
+      setOtpCode('');
+      setResendSeconds(
+        RESEND_COOLDOWN_SECONDS,
+      );
+
+      toast({
+        title: 'Novo código enviado',
+        description:
+          'Use somente o código mais recente recebido por e-mail.',
+      });
+    } catch (resendError) {
+      console.error(
+        'Erro ao reenviar código:',
+        resendError,
+      );
+
+      setError(
+        getFriendlyOtpError(resendError),
+      );
+    } finally {
+      setResending(false);
+    }
+  };
+
+  const handleBackToRegister = () => {
+    if (
+      verifying
+      || resending
+    ) {
+      return;
+    }
+
+    setStep('register');
+    setOtpCode('');
+    setError('');
+  };
+
+  const handleGoogle = () => {
+    if (
+      submitting
+      || googleLoading
+    ) {
+      return;
+    }
+
+    setError('');
+    setGoogleLoading(true);
+
+    try {
+      const destination = (
+        requestedRoute
+        || '/onboarding'
+      );
+
+      if (isSafeInternalRoute(destination)) {
+        safeSessionSet(
+          REDIRECT_AFTER_LOGIN_KEY,
+          destination,
+        );
+      }
+
+      const callbackUrl = (
+        `${window.location.origin}/login`
+      );
+
+      const result = base44.auth.loginWithProvider(
+        'google',
+        callbackUrl,
+      );
+
+      if (
+        result
+        && typeof result.catch === 'function'
+      ) {
+        result.catch((providerError) => {
+          console.error(
+            'Erro no cadastro com Google:',
+            providerError,
+          );
+
+          setGoogleLoading(false);
+
+          setError(
+            'Não foi possível iniciar o cadastro com Google.',
+          );
+        });
+      }
+    } catch (providerError) {
+      console.error(
+        'Erro no cadastro com Google:',
+        providerError,
+      );
+
+      setGoogleLoading(false);
+
+      setError(
+        'Não foi possível iniciar o cadastro com Google.',
+      );
+    }
+  };
+
+  if (
+    userLoading
+    && !user
+  ) {
+    return <RegisterLoading />;
+  }
+
+  if (step === 'verification') {
+    return (
+      <VerificationStep
+        email={normalizedEmail}
+        otpCode={otpCode}
+        setOtpCode={setOtpCode}
+        error={error}
+        verifying={verifying}
+        resending={resending}
+        resendSeconds={resendSeconds}
+        onVerify={handleVerifyOtp}
+        onResend={handleResendOtp}
+        onBack={handleBackToRegister}
+      />
+    );
+  }
+
+  return (
+    <main className="min-h-screen min-w-0 overflow-x-hidden bg-background lg:grid lg:grid-cols-[minmax(360px,0.9fr)_minmax(520px,1.1fr)]">
+      <RegisterBenefits />
+
+      <div className="flex min-h-screen min-w-0 items-center justify-center px-4 py-8 sm:px-6 lg:px-10 xl:px-16">
+        <div className="w-full min-w-0 max-w-md">
+          <div className="mb-8 text-center lg:text-left">
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary lg:mx-0">
+              <UserPlus
+                className="h-7 w-7 text-primary-foreground"
+                aria-hidden="true"
+              />
+            </div>
+
+            <p className="mb-2 text-sm font-semibold text-primary">
+              Comece gratuitamente
+            </p>
+
+            <h1 className="text-3xl font-bold tracking-tight text-foreground">
+              Crie sua conta
+            </h1>
+
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground sm:text-base">
+              Organize suas ideias e prepare apresentações
+              com mais clareza e segurança.
+            </p>
+          </div>
+
+          <div className="min-w-0 rounded-2xl border border-border bg-card p-5 shadow-sm sm:p-7">
+            {error && (
+              <Alert
+                variant="destructive"
+                className="mb-5"
+              >
+                <AlertCircle className="h-4 w-4" />
+
+                <AlertDescription>
+                  {error}
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-12 w-full font-medium"
+              onClick={handleGoogle}
+              disabled={submitting || googleLoading}
+            >
+              {googleLoading ? (
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              ) : (
+                <GoogleIcon className="mr-2 h-5 w-5" />
+              )}
+
+              {googleLoading
+                ? 'Abrindo Google...'
+                : 'Continuar com Google'}
+            </Button>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border" />
+              </div>
+
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-3 text-muted-foreground">
+                  ou cadastre com e-mail
+                </span>
+              </div>
+            </div>
+
+            <form
+              onSubmit={handleRegister}
+              noValidate
+              className="space-y-5"
+            >
+              <div className="space-y-2">
+                <Label htmlFor="register-email">
+                  E-mail
+                </Label>
+
+                <div className="relative">
+                  <Mail
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+
+                  <Input
+                    id="register-email"
+                    type="email"
+                    inputMode="email"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    autoFocus
+                    placeholder="seuemail@exemplo.com"
+                    value={form.email}
+                    onChange={handleFieldChange('email')}
+                    className="h-12 pl-10"
+                    disabled={submitting || googleLoading}
+                    aria-invalid={
+                      Boolean(form.email)
+                      && !isValidEmail(form.email)
+                    }
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="register-password">
+                  Senha
+                </Label>
+
+                <div className="relative">
+                  <Lock
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+
+                  <Input
+                    id="register-password"
+                    type={showPassword ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    placeholder="Crie uma senha segura"
+                    value={form.password}
+                    onChange={handleFieldChange('password')}
+                    className="h-12 px-10"
+                    disabled={submitting || googleLoading}
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowPassword(
+                        (current) => !current,
+                      );
+                    }}
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={
+                      showPassword
+                        ? 'Ocultar senha'
+                        : 'Mostrar senha'
+                    }
+                    disabled={submitting || googleLoading}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+
+                <div className="rounded-xl border bg-muted/25 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium">
+                      Força da senha
+                    </p>
+
+                    <p
+                      className={`text-xs font-semibold ${passwordStrength.className}`}
+                    >
+                      {passwordStrength.label}
+                    </p>
+                  </div>
+
+                  <Progress
+                    value={passwordStrength.percentage}
+                    className="mt-2 h-2"
+                  />
+
+                  <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <PasswordRequirement
+                      valid={passwordChecks.length}
+                    >
+                      8 caracteres
+                    </PasswordRequirement>
+
+                    <PasswordRequirement
+                      valid={passwordChecks.uppercase}
+                    >
+                      Letra maiúscula
+                    </PasswordRequirement>
+
+                    <PasswordRequirement
+                      valid={passwordChecks.lowercase}
+                    >
+                      Letra minúscula
+                    </PasswordRequirement>
+
+                    <PasswordRequirement
+                      valid={passwordChecks.number}
+                    >
+                      Número
+                    </PasswordRequirement>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="register-confirm-password">
+                  Confirmar senha
+                </Label>
+
+                <div className="relative">
+                  <Lock
+                    className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+
+                  <Input
+                    id="register-confirm-password"
+                    type={
+                      showConfirmPassword
+                        ? 'text'
+                        : 'password'
+                    }
+                    autoComplete="new-password"
+                    placeholder="Digite novamente"
+                    value={form.confirmPassword}
+                    onChange={handleFieldChange('confirmPassword')}
+                    className="h-12 px-10"
+                    disabled={submitting || googleLoading}
+                    aria-invalid={
+                      Boolean(form.confirmPassword)
+                      && !passwordsMatch
+                    }
+                    required
+                  />
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowConfirmPassword(
+                        (current) => !current,
+                      );
+                    }}
+                    className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    aria-label={
+                      showConfirmPassword
+                        ? 'Ocultar confirmação'
+                        : 'Mostrar confirmação'
+                    }
+                    disabled={submitting || googleLoading}
+                  >
+                    {showConfirmPassword ? (
+                      <EyeOff className="h-4 w-4" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+
+                {form.confirmPassword && (
+                  <p
+                    className={`text-xs ${
+                      passwordsMatch
+                        ? 'text-emerald-600'
+                        : 'text-destructive'
+                    }`}
+                  >
+                    {passwordsMatch
+                      ? 'As senhas são iguais.'
+                      : 'As senhas não correspondem.'}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-start gap-3 rounded-xl border p-3">
+                <Checkbox
+                  id="accept-terms"
+                  checked={acceptTerms}
+                  onCheckedChange={(checked) => {
+                    setAcceptTerms(
+                      checked === true,
+                    );
+
+                    if (error) {
+                      setError('');
+                    }
+                  }}
+                  disabled={submitting || googleLoading}
+                  className="mt-0.5"
+                />
+
+                <Label
+                  htmlFor="accept-terms"
+                  className="cursor-pointer text-sm font-normal leading-6 text-muted-foreground"
+                >
+                  Li e aceito os{' '}
+                  <Link
+                    to="/terms"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Termos de Uso
+                  </Link>{' '}
+                  e a{' '}
+                  <Link
+                    to="/privacy"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-primary hover:underline"
+                  >
+                    Política de Privacidade
+                  </Link>.
+                </Label>
+              </div>
+
+              <Button
+                type="submit"
+                className="h-12 w-full font-semibold"
+                disabled={!canSubmit}
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Criando conta...
+                  </>
+                ) : (
+                  <>
+                    Criar minha conta
+                    <ArrowRight className="ml-2 h-5 w-5" />
+                  </>
+                )}
+              </Button>
+            </form>
+          </div>
+
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Já possui uma conta?{' '}
+            <Link
+              to="/login"
+              className="font-semibold text-primary hover:underline"
+            >
+              Entrar
+            </Link>
+          </p>
+
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+            <Link
+              to="/terms"
+              className="hover:text-primary hover:underline"
+            >
+              Termos de Uso
+            </Link>
+
+            <span aria-hidden="true">
+              •
+            </span>
+
+            <Link
+              to="/privacy"
+              className="hover:text-primary hover:underline"
+            >
+              Política de Privacidade
+            </Link>
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
