@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BookOpen,
@@ -99,6 +99,68 @@ function parseTags(value) {
     .split(',')
     .map((tag) => tag.trim())
     .filter(Boolean);
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function normalizeTags(value) {
+  const seen = new Set();
+
+  return parseTags(value)
+    .filter((tag) => {
+      const key = normalize(tag);
+
+      if (!key || seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .join(', ');
+}
+
+function createUniqueCopyTitle(baseTitle, items) {
+  const base = String(baseTitle || 'Conteúdo').trim() || 'Conteúdo';
+  const existingTitles = new Set(
+    uniqueById(items).map((item) => normalize(item.title)),
+  );
+
+  let attempt = 1;
+  let candidate = `${base} — cópia`;
+
+  while (existingTitles.has(normalize(candidate))) {
+    attempt += 1;
+    candidate = `${base} — cópia ${attempt}`;
+  }
+
+  return candidate;
+}
+
+function buildAdditionalContent(item) {
+  const lines = [];
+
+  if (item?.source) {
+    lines.push(`Fonte: ${item.source}`);
+  }
+
+  const tags = normalizeTags(item?.tags);
+
+  if (tags) {
+    lines.push(`Etiquetas: ${tags}`);
+  }
+
+  return lines.join('\n');
 }
 
 function LibraryLoading() {
@@ -242,6 +304,11 @@ export default function Library() {
   const [inserting, setInserting] = useState(false);
   const [loadError, setLoadError] = useState('');
 
+  const saveLockRef = useRef(false);
+  const deleteLockRef = useRef(false);
+  const insertLockRef = useRef(false);
+  const itemActionLocksRef = useRef(new Set());
+
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -259,6 +326,10 @@ export default function Library() {
   const loadData = useCallback(
     async ({ silent = false } = {}) => {
       if (!user?.id) {
+        setItems([]);
+        setPresentations([]);
+        setBlockTypes([]);
+        setLoadError('Entre na sua conta para acessar a biblioteca.');
         setLoading(false);
         setRefreshing(false);
         return;
@@ -286,9 +357,26 @@ export default function Library() {
           ),
         ]);
 
-        setItems(Array.isArray(itemRows) ? itemRows : []);
-        setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
-        setBlockTypes(Array.isArray(typeRows) ? typeRows : []);
+        setItems(
+          uniqueById(itemRows).filter(
+            (item) => item.user_id === user.id,
+          ),
+        );
+
+        setPresentations(
+          uniqueById(presentationRows).filter(
+            (presentation) => (
+              presentation.user_id === user.id
+              && presentation.is_archived !== true
+            ),
+          ),
+        );
+
+        setBlockTypes(
+          uniqueById(typeRows).filter(
+            (type) => type.active !== false,
+          ),
+        );
       } catch (error) {
         console.error('Erro ao carregar biblioteca:', error);
         setLoadError('Não foi possível carregar sua biblioteca agora.');
@@ -397,17 +485,45 @@ export default function Library() {
       return;
     }
 
-    if (!user?.id || saving) return;
+    if (
+      !user?.id
+      || saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
 
+    if (
+      editingItem?.id
+      && (
+        editingItem.user_id !== user.id
+        || !items.some((item) => item.id === editingItem.id)
+      )
+    ) {
+      toast({
+        title: 'Conteúdo inválido',
+        description: 'Atualize a biblioteca antes de editar novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const validType = ITEM_TYPES.some(
+      (type) => type.value === form.item_type,
+    );
+
+    saveLockRef.current = true;
     setSaving(true);
 
     const payload = {
       title,
-      item_type: form.item_type,
+      item_type: validType
+        ? form.item_type
+        : 'citation',
       summary: form.summary.trim(),
       content: form.content.trim(),
       source: form.source.trim(),
-      tags: form.tags.trim(),
+      tags: normalizeTags(form.tags),
       is_favorite: Boolean(form.is_favorite),
     };
 
@@ -420,7 +536,11 @@ export default function Library() {
 
         setItems((current) => current.map((item) => (
           item.id === editingItem.id
-            ? { ...item, ...payload, ...(updated || {}) }
+            ? {
+                ...item,
+                ...payload,
+                ...(updated || {}),
+              }
             : item
         )));
 
@@ -431,42 +551,94 @@ export default function Library() {
           user_id: user.id,
         });
 
-        setItems((current) => [created, ...current]);
-        toast({ title: 'Conteúdo adicionado à biblioteca' });
+        if (!created?.id) {
+          throw new Error(
+            'O novo conteúdo não retornou um ID válido.',
+          );
+        }
+
+        setItems((current) => [
+          created,
+          ...current,
+        ]);
+
+        toast({
+          title: 'Conteúdo adicionado à biblioteca',
+        });
       }
 
-      closeForm();
+      setFormOpen(false);
+      setEditingItem(null);
+      setForm(EMPTY_FORM);
     } catch (error) {
-      console.error('Erro ao salvar item da biblioteca:', error);
+      console.error(
+        'Erro ao salvar item da biblioteca:',
+        error,
+      );
+
       toast({
         title: 'Não foi possível salvar',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          error.message
+          || 'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleFavorite = async (item) => {
+    if (
+      !item?.id
+      || !user?.id
+      || item.user_id !== user.id
+      || itemActionLocksRef.current.has(item.id)
+    ) {
+      return;
+    }
+
+    itemActionLocksRef.current.add(item.id);
+
     const nextValue = !item.is_favorite;
 
     setItems((current) => current.map((currentItem) => (
       currentItem.id === item.id
-        ? { ...currentItem, is_favorite: nextValue }
+        ? {
+            ...currentItem,
+            is_favorite: nextValue,
+          }
         : currentItem
     )));
 
     try {
-      await base44.entities.LibraryItem.update(item.id, {
-        is_favorite: nextValue,
-      });
+      const updated = await base44.entities.LibraryItem.update(
+        item.id,
+        {
+          is_favorite: nextValue,
+        },
+      );
+
+      if (updated?.id) {
+        setItems((current) => current.map((currentItem) => (
+          currentItem.id === item.id
+            ? {
+                ...currentItem,
+                ...updated,
+              }
+            : currentItem
+        )));
+      }
     } catch (error) {
       console.error('Erro ao favoritar item:', error);
 
       setItems((current) => current.map((currentItem) => (
         currentItem.id === item.id
-          ? { ...currentItem, is_favorite: !nextValue }
+          ? {
+              ...currentItem,
+              is_favorite: !nextValue,
+            }
           : currentItem
       )));
 
@@ -474,58 +646,126 @@ export default function Library() {
         title: 'Não foi possível atualizar o favorito',
         variant: 'destructive',
       });
+    } finally {
+      itemActionLocksRef.current.delete(item.id);
     }
   };
 
   const handleDuplicate = async (item) => {
-    if (!user?.id) return;
+    if (
+      !item?.id
+      || !user?.id
+      || item.user_id !== user.id
+      || itemActionLocksRef.current.has(item.id)
+    ) {
+      return;
+    }
+
+    itemActionLocksRef.current.add(item.id);
 
     try {
       const created = await base44.entities.LibraryItem.create({
         user_id: user.id,
-        title: `${item.title} — cópia`,
-        item_type: item.item_type,
+        title: createUniqueCopyTitle(
+          item.title,
+          items,
+        ),
+        item_type: ITEM_TYPES.some(
+          (type) => type.value === item.item_type,
+        )
+          ? item.item_type
+          : 'citation',
         summary: item.summary || '',
         content: item.content || '',
         source: item.source || '',
-        tags: item.tags || '',
+        tags: normalizeTags(item.tags),
         is_favorite: false,
       });
 
-      setItems((current) => [created, ...current]);
+      if (!created?.id) {
+        throw new Error(
+          'A cópia não retornou um ID válido.',
+        );
+      }
+
+      setItems((current) => [
+        created,
+        ...current,
+      ]);
+
       toast({ title: 'Conteúdo duplicado' });
     } catch (error) {
       console.error('Erro ao duplicar item:', error);
+
       toast({
         title: 'Não foi possível duplicar',
+        description:
+          error.message
+          || 'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
+    } finally {
+      itemActionLocksRef.current.delete(item.id);
     }
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget?.id || deleting) return;
+    const target = deleteTarget;
 
+    if (
+      !target?.id
+      || !user?.id
+      || target.user_id !== user.id
+      || deleting
+      || deleteLockRef.current
+    ) {
+      return;
+    }
+
+    deleteLockRef.current = true;
     setDeleting(true);
 
     try {
-      await base44.entities.LibraryItem.delete(deleteTarget.id);
-      setItems((current) => current.filter((item) => item.id !== deleteTarget.id));
+      await base44.entities.LibraryItem.delete(
+        target.id,
+      );
+
+      setItems((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
       setDeleteTarget(null);
+
       toast({ title: 'Conteúdo excluído' });
     } catch (error) {
       console.error('Erro ao excluir item:', error);
+
       toast({
         title: 'Não foi possível excluir',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          'Atualize a biblioteca e tente novamente.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      deleteLockRef.current = false;
       setDeleting(false);
     }
   };
 
   const openInsertDialog = (item) => {
+    if (
+      !item?.id
+      || item.user_id !== user?.id
+    ) {
+      toast({
+        title: 'Conteúdo inválido',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setInsertTarget(item);
     setSelectedPresentationId('');
     setInsertAsEssential(false);
@@ -551,46 +791,104 @@ export default function Library() {
   };
 
   const handleInsert = async () => {
-    if (!insertTarget || !selectedPresentationId || inserting) return;
+    if (
+      !insertTarget?.id
+      || !selectedPresentationId
+      || !user?.id
+      || inserting
+      || insertLockRef.current
+    ) {
+      return;
+    }
 
+    const selectedPresentation = presentations.find(
+      (presentation) => (
+        presentation.id === selectedPresentationId
+        && presentation.user_id === user.id
+        && presentation.is_archived !== true
+      ),
+    );
+
+    if (!selectedPresentation) {
+      toast({
+        title: 'Apresentação inválida',
+        description:
+          'Atualize a biblioteca e selecione novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const currentItem = items.find(
+      (item) => (
+        item.id === insertTarget.id
+        && item.user_id === user.id
+      ),
+    );
+
+    if (!currentItem) {
+      toast({
+        title: 'Conteúdo não encontrado',
+        description:
+          'Ele pode ter sido removido em outra janela.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const blockTypeId = findBlockTypeId(
+      currentItem.item_type,
+    );
+
+    if (!blockTypeId) {
+      toast({
+        title: 'Tipo de bloco indisponível',
+        description:
+          'Ative ao menos um tipo de bloco antes de inserir.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    insertLockRef.current = true;
     setInserting(true);
 
     try {
-      const siblings = await base44.entities.PresentationBlock.filter(
-        {
-          presentation_id: selectedPresentationId,
-          parent_id: '',
-        },
-        'order_index',
+      const allBlocks = uniqueById(
+        await base44.entities.PresentationBlock.filter(
+          {
+            presentation_id: selectedPresentation.id,
+          },
+          'order_index',
+        ),
+      ).filter(
+        (block) => (
+          block.presentation_id
+          === selectedPresentation.id
+        ),
       );
 
-      let rootBlocks = Array.isArray(siblings) ? siblings : [];
-
-      if (rootBlocks.length === 0) {
-        const allBlocks = await base44.entities.PresentationBlock.filter(
-          { presentation_id: selectedPresentationId },
-          'order_index',
-        );
-
-        rootBlocks = (Array.isArray(allBlocks) ? allBlocks : [])
-          .filter((block) => !block.parent_id);
-      }
+      const rootBlocks = allBlocks.filter(
+        (block) => !block.parent_id,
+      );
 
       const nextOrder = rootBlocks.reduce(
-        (highest, block) => Math.max(highest, Number(block.order_index) || 0),
+        (highest, block) => Math.max(
+          highest,
+          Number(block.order_index) || 0,
+        ),
         -1,
       ) + 1;
 
-      await base44.entities.PresentationBlock.create({
-        presentation_id: selectedPresentationId,
-        parent_id: '',
-        block_type_id: findBlockTypeId(insertTarget.item_type),
-        title: insertTarget.title,
-        summary: insertTarget.summary || '',
-        content: insertTarget.content || '',
-        additional_content: insertTarget.source
-          ? `Fonte: ${insertTarget.source}`
-          : '',
+      const created = await base44.entities.PresentationBlock.create({
+        presentation_id: selectedPresentation.id,
+        parent_id: null,
+        block_type_id: blockTypeId,
+        title: currentItem.title,
+        summary: currentItem.summary || '',
+        content: currentItem.content || '',
+        additional_content:
+          buildAdditionalContent(currentItem),
         presenter_notes: '',
         order_index: nextOrder,
         depth_level: 0,
@@ -602,9 +900,11 @@ export default function Library() {
         show_to_audience: true,
       });
 
-      const selectedPresentation = presentations.find(
-        (presentation) => presentation.id === selectedPresentationId,
-      );
+      if (!created?.id) {
+        throw new Error(
+          'O novo bloco não retornou um ID válido.',
+        );
+      }
 
       setInsertTarget(null);
       setSelectedPresentationId('');
@@ -612,18 +912,24 @@ export default function Library() {
 
       toast({
         title: 'Conteúdo inserido',
-        description: selectedPresentation?.title
-          ? `Adicionado em “${selectedPresentation.title}”.`
-          : 'O bloco foi adicionado à apresentação.',
+        description:
+          `Adicionado em “${selectedPresentation.title}”.`,
       });
     } catch (error) {
-      console.error('Erro ao inserir conteúdo na apresentação:', error);
+      console.error(
+        'Erro ao inserir conteúdo na apresentação:',
+        error,
+      );
+
       toast({
         title: 'Não foi possível inserir o conteúdo',
-        description: 'Abra a apresentação e tente novamente.',
+        description:
+          error.message
+          || 'Abra a apresentação e tente novamente.',
         variant: 'destructive',
       });
     } finally {
+      insertLockRef.current = false;
       setInserting(false);
     }
   };
@@ -637,6 +943,22 @@ export default function Library() {
 
   if (userLoading || loading) {
     return <LibraryLoading />;
+  }
+
+  if (!user?.id) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center px-4">
+        <EmptyState
+          icon={BookOpen}
+          title="Entre para acessar sua biblioteca"
+          description="Seus conteúdos reutilizáveis ficam vinculados à sua conta."
+          actionLabel="Entrar"
+          onAction={() => {
+            window.location.href = '/login';
+          }}
+        />
+      </div>
+    );
   }
 
   return (
@@ -657,14 +979,23 @@ export default function Library() {
               setRefreshing(true);
               loadData({ silent: true });
             }}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || saving
+              || deleting
+              || inserting
+            }
             className="flex-1 sm:flex-none"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
 
-          <Button onClick={openCreate} className="flex-1 sm:flex-none">
+          <Button
+            onClick={openCreate}
+            className="flex-1 sm:flex-none"
+            disabled={saving || deleting || inserting}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Novo conteúdo
           </Button>
@@ -978,7 +1309,14 @@ export default function Library() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(insertTarget)} onOpenChange={(open) => !open && setInsertTarget(null)}>
+      <Dialog
+        open={Boolean(insertTarget)}
+        onOpenChange={(open) => {
+          if (!open && !inserting) {
+            setInsertTarget(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Inserir em uma apresentação</DialogTitle>
