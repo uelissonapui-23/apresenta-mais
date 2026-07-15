@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -136,6 +137,64 @@ function clampPercentage(value) {
       Math.round(toNumber(value)),
     ),
   );
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || record?.started_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortNewestFirst(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const timestampDifference = (
+      getRecordTimestamp(right)
+      - getRecordTimestamp(left)
+    );
+
+    if (timestampDifference !== 0) {
+      return timestampDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
 }
 
 function formatDuration(totalSeconds) {
@@ -594,13 +653,29 @@ export default function Home() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
 
+  const loadingLockRef = useRef(false);
+  const favoriteLocksRef = useRef(new Set());
+
   const loadDashboard = useCallback(
     async ({ silent = false } = {}) => {
+      if (loadingLockRef.current) {
+        return;
+      }
+
       if (!user?.id) {
+        setPresentations([]);
+        setTypes([]);
+        setObjectives([]);
+        setSessions([]);
+        setTemplates([]);
+        setPreferences(null);
+        setLoadError('Entre na sua conta para acessar o painel.');
         setLoading(false);
         setRefreshing(false);
         return;
       }
+
+      loadingLockRef.current = true;
 
       if (!silent) {
         setLoading(true);
@@ -664,40 +739,56 @@ export default function Home() {
           ),
         ]);
 
-        setPresentations(
-          Array.isArray(presentationRows)
-            ? presentationRows
-            : [],
+        const normalizedPresentations = sortNewestFirst(
+          presentationRows,
+        ).filter(
+          (presentation) => (
+            presentation.user_id === user.id
+          ),
         );
 
+        const validPresentationIds = new Set(
+          normalizedPresentations.map(
+            (presentation) => presentation.id,
+          ),
+        );
+
+        setPresentations(normalizedPresentations);
+
         setTypes(
-          Array.isArray(typeRows)
-            ? typeRows
-            : [],
+          uniqueById(typeRows).filter(
+            (type) => type.active !== false,
+          ),
         );
 
         setObjectives(
-          Array.isArray(objectiveRows)
-            ? objectiveRows
-            : [],
+          uniqueById(objectiveRows).filter(
+            (objective) => objective.active !== false,
+          ),
         );
 
         setSessions(
-          Array.isArray(sessionRows)
-            ? sessionRows
-            : [],
+          sortNewestFirst(sessionRows).filter(
+            (session) => (
+              session.user_id === user.id
+              && validPresentationIds.has(
+                session.presentation_id,
+              )
+            ),
+          ),
         );
 
         setTemplates(
-          Array.isArray(templateRows)
-            ? templateRows
-            : [],
+          uniqueById(templateRows).filter(
+            (template) => (
+              template.active !== false
+              && template.is_official === true
+            ),
+          ),
         );
 
         setPreferences(
-          Array.isArray(preferenceRows)
-            ? preferenceRows[0] || null
-            : null,
+          selectCurrentRecord(preferenceRows),
         );
       } catch (error) {
         console.error(
@@ -716,6 +807,7 @@ export default function Home() {
           variant: 'destructive',
         });
       } finally {
+        loadingLockRef.current = false;
         setLoading(false);
         setRefreshing(false);
       }
@@ -772,12 +864,25 @@ export default function Home() {
 
   const activeSession = useMemo(
     () => sessions.find(
-      (session) => (
-        session.status === 'active'
-        || session.status === 'paused'
-      ),
-    ),
-    [sessions],
+      (session) => {
+        const presentation = presentationMap[
+          session.presentation_id
+        ];
+
+        return (
+          ['active', 'paused'].includes(session.status)
+          && presentation
+          && presentation.user_id === user?.id
+          && presentation.is_archived !== true
+          && presentation.status !== 'archived'
+        );
+      },
+    ) || null,
+    [
+      presentationMap,
+      sessions,
+      user?.id,
+    ],
   );
 
   const activeSessionPresentation = activeSession
@@ -837,7 +942,10 @@ export default function Home() {
   }, [preferences?.accessibility_settings_json]);
 
   const handleRefresh = async () => {
-    if (refreshing) {
+    if (
+      refreshing
+      || loadingLockRef.current
+    ) {
       return;
     }
 
@@ -849,11 +957,32 @@ export default function Home() {
   };
 
   const handleFavorite = async (presentation) => {
-    if (!presentation?.id) {
+    if (
+      !presentation?.id
+      || !user?.id
+      || presentation.user_id !== user.id
+      || favoriteLocksRef.current.has(presentation.id)
+    ) {
       return;
     }
 
-    const nextValue = !presentation.is_favorite;
+    const currentPresentation = presentations.find(
+      (item) => item.id === presentation.id,
+    );
+
+    if (!currentPresentation) {
+      toast({
+        title: 'Apresentação não encontrada',
+        description:
+          'Atualize o painel antes de tentar novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    favoriteLocksRef.current.add(presentation.id);
+
+    const nextValue = !currentPresentation.is_favorite;
 
     setPresentations((current) => (
       current.map((item) => (
@@ -867,12 +996,26 @@ export default function Home() {
     ));
 
     try {
-      await base44.entities.Presentation.update(
+      const updated = await base44.entities.Presentation.update(
         presentation.id,
         {
           is_favorite: nextValue,
         },
       );
+
+      if (updated?.id) {
+        setPresentations((current) => (
+          current.map((item) => (
+            item.id === presentation.id
+              ? {
+                  ...item,
+                  ...updated,
+                  is_favorite: nextValue,
+                }
+              : item
+          ))
+        ));
+      }
     } catch (error) {
       console.error(
         'Erro ao atualizar favorito:',
@@ -884,7 +1027,8 @@ export default function Home() {
           item.id === presentation.id
             ? {
                 ...item,
-                is_favorite: !nextValue,
+                is_favorite:
+                  currentPresentation.is_favorite,
               }
             : item
         ))
@@ -893,9 +1037,13 @@ export default function Home() {
       toast({
         title: 'Não foi possível atualizar o favorito',
         description:
-          'Tente novamente em alguns instantes.',
+          'A alteração foi desfeita. Tente novamente.',
         variant: 'destructive',
       });
+    } finally {
+      favoriteLocksRef.current.delete(
+        presentation.id,
+      );
     }
   };
 
@@ -904,6 +1052,32 @@ export default function Home() {
     || loading
   ) {
     return <DashboardLoading />;
+  }
+
+  if (!user?.id) {
+    return (
+      <div className="mx-auto flex min-h-[70vh] max-w-2xl items-center px-4 py-10">
+        <Card className="w-full border-dashed">
+          <CardContent className="flex flex-col items-center p-8 text-center sm:p-10">
+            <PresentationIcon className="h-10 w-10 text-muted-foreground" />
+
+            <h1 className="mt-4 text-xl font-semibold">
+              Entre para acessar seu painel
+            </h1>
+
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Suas apresentações, sessões e preferências ficam vinculadas à sua conta.
+            </p>
+
+            <Button asChild className="mt-5">
+              <Link to="/login">
+                Entrar
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   if (
@@ -980,7 +1154,10 @@ export default function Home() {
           variant="outline"
           size="sm"
           onClick={handleRefresh}
-          disabled={refreshing}
+          disabled={
+            refreshing
+            || loadingLockRef.current
+          }
           className="w-full sm:w-auto"
         >
           <RefreshCw
@@ -1005,6 +1182,10 @@ export default function Home() {
               variant="outline"
               size="sm"
               onClick={handleRefresh}
+              disabled={
+                refreshing
+                || loadingLockRef.current
+              }
             >
               Tentar novamente
             </Button>
