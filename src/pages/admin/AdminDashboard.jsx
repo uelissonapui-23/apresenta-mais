@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -169,6 +169,10 @@ const ADMIN_SECTIONS = [
 const EMPTY_DATA = {
   users: [],
   plans: [],
+  planRequests: [],
+  contributions: [],
+  ads: [],
+  paymentConfig: [],
   types: [],
   objectives: [],
   styles: [],
@@ -184,6 +188,48 @@ const EMPTY_DATA = {
 
 function normalizeRows(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function uniqueById(value) {
+  const map = new Map();
+
+  for (const item of normalizeRows(value)) {
+    if (item?.id) {
+      map.set(item.id, item);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || record?.started_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortNewestFirst(value) {
+  return uniqueById(value).sort((left, right) => {
+    const timeDifference = (
+      getRecordTimestamp(right)
+      - getRecordTimestamp(left)
+    );
+
+    if (timeDifference !== 0) {
+      return timeDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
 }
 
 function isActive(record) {
@@ -332,13 +378,21 @@ export default function AdminDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const loadingLockRef = useRef(false);
 
   const loadDashboard = useCallback(async ({ silent = false } = {}) => {
+    if (loadingLockRef.current) {
+      return;
+    }
+
     if (!user?.id || !isAdmin) {
+      setData(EMPTY_DATA);
       setLoading(false);
       setRefreshing(false);
       return;
     }
+
+    loadingLockRef.current = true;
 
     if (!silent) {
       setLoading(true);
@@ -350,6 +404,10 @@ export default function AdminDashboard() {
       const results = await Promise.all([
         base44.entities.UserProfile.filter({}, '-created_date', 500),
         base44.entities.Plan.filter({}, 'name', 200),
+        base44.entities.PlanRequest.filter({}, '-created_date', 500),
+        base44.entities.SupportContribution.filter({}, '-created_date', 500),
+        base44.entities.AdConfiguration.filter({}, '-updated_date', 50),
+        base44.entities.PaymentConfiguration.filter({}, '-updated_date', 50),
         base44.entities.PresentationType.filter({}, 'order_index', 200),
         base44.entities.PresentationObjective.filter({}, 'order_index', 200),
         base44.entities.CommunicationStyle.filter({}, 'order_index', 200),
@@ -364,19 +422,23 @@ export default function AdminDashboard() {
       ]);
 
       setData({
-        users: normalizeRows(results[0]),
-        plans: normalizeRows(results[1]),
-        types: normalizeRows(results[2]),
-        objectives: normalizeRows(results[3]),
-        styles: normalizeRows(results[4]),
-        blockTypes: normalizeRows(results[5]),
-        templates: normalizeRows(results[6]),
-        flows: normalizeRows(results[7]),
-        questions: normalizeRows(results[8]),
-        themes: normalizeRows(results[9]),
-        tips: normalizeRows(results[10]),
-        presentations: normalizeRows(results[11]),
-        sessions: normalizeRows(results[12]),
+        users: sortNewestFirst(results[0]),
+        plans: uniqueById(results[1]),
+        planRequests: sortNewestFirst(results[2]),
+        contributions: sortNewestFirst(results[3]),
+        ads: sortNewestFirst(results[4]),
+        paymentConfig: sortNewestFirst(results[5]),
+        types: uniqueById(results[6]),
+        objectives: uniqueById(results[7]),
+        styles: uniqueById(results[8]),
+        blockTypes: uniqueById(results[9]),
+        templates: sortNewestFirst(results[10]),
+        flows: sortNewestFirst(results[11]),
+        questions: uniqueById(results[12]),
+        themes: uniqueById(results[13]),
+        tips: sortNewestFirst(results[14]),
+        presentations: sortNewestFirst(results[15]),
+        sessions: sortNewestFirst(results[16]),
       });
 
       setLastUpdated(new Date());
@@ -390,6 +452,7 @@ export default function AdminDashboard() {
         variant: 'destructive',
       });
     } finally {
+      loadingLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -401,8 +464,27 @@ export default function AdminDashboard() {
 
   const summary = useMemo(() => {
     const activeUsers = data.users.filter(isActive).length;
-    const admins = data.users.filter((item) => item.role === 'admin').length;
-    const completedSessions = data.sessions.filter((item) => item.status === 'completed');
+
+    const admins = data.users.filter(
+      (item) => (
+        item.role === 'admin'
+        && isActive(item)
+      ),
+    ).length;
+
+    const validPresentationIds = new Set(
+      data.presentations.map(
+        (presentation) => presentation.id,
+      ),
+    );
+
+    const completedSessions = data.sessions.filter(
+      (item) => (
+        item.status === 'completed'
+        && validPresentationIds.has(item.presentation_id)
+      ),
+    );
+
     const totalSessionSeconds = completedSessions.reduce(
       (total, item) => total + (Number(item.elapsed_seconds) || 0),
       0,
@@ -414,7 +496,12 @@ export default function AdminDashboard() {
       presentations: data.presentations.length,
       completedSessions: completedSessions.length,
       totalSessionSeconds,
-      officialTemplates: data.templates.filter((item) => item.is_official).length,
+      officialTemplates: data.templates.filter(
+        (item) => (
+          item.is_official
+          && isActive(item)
+        ),
+      ).length,
       activeFlows: data.flows.filter(isActive).length,
     };
   }, [data]);
@@ -475,6 +562,15 @@ export default function AdminDashboard() {
         detail: `${activeThemes.length} temas ativos para edição e apresentação.`,
         path: '/admin/themes',
       },
+      {
+        label: 'Pagamentos e monetização',
+        valid: (
+          data.paymentConfig.some(isActive)
+          && data.plans.some(isActive)
+        ),
+        detail: `${data.plans.filter(isActive).length} planos ativos e ${data.paymentConfig.filter(isActive).length} configuração PIX ativa.`,
+        path: '/admin/payment-config',
+      },
     ];
   }, [data]);
 
@@ -484,6 +580,13 @@ export default function AdminDashboard() {
   }, [healthChecks]);
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || loadingLockRef.current
+    ) {
+      return;
+    }
+
     setRefreshing(true);
     await loadDashboard({ silent: true });
   };
@@ -530,7 +633,10 @@ export default function AdminDashboard() {
 
           <Button
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || loadingLockRef.current
+            }
             className="w-full sm:w-auto"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -545,7 +651,15 @@ export default function AdminDashboard() {
           <AlertTitle>Dados incompletos</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>{error}</span>
-            <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={
+                refreshing
+                || loadingLockRef.current
+              }
+            >
               Tentar novamente
             </Button>
           </AlertDescription>
