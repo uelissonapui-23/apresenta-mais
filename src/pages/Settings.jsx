@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Accessibility,
   Check,
@@ -7,6 +7,7 @@ import {
   FileText,
   Gauge,
   Loader2,
+  Lock,
   Monitor,
   Moon,
   Palette,
@@ -156,6 +157,96 @@ function parseAccessibility(value) {
     ...parsed,
     large_controls: largeControls,
   };
+}
+
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function normalizeDate(value, { endOfDay = false } = {}) {
+  if (!value) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+
+  const date = new Date(
+    dateOnly
+      ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`
+      : raw,
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isProfilePlanActive(profile) {
+  if (!profile?.plan_id) {
+    return false;
+  }
+
+  const status = String(profile.plan_status || 'none')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'permanent') {
+    return true;
+  }
+
+  if (status !== 'active') {
+    return false;
+  }
+
+  const expiration = normalizeDate(
+    profile.plan_expires_at,
+    { endOfDay: true },
+  );
+
+  return !expiration || expiration.getTime() >= Date.now();
 }
 
 function normalizePreferences(raw, userId) {
@@ -411,24 +502,44 @@ function PreviewCard({ prefs, theme }) {
 }
 
 export default function Settings() {
-  const { user, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    profile,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
   const { toast } = useToast();
 
   const [prefs, setPrefs] = useState(null);
   const [savedSnapshot, setSavedSnapshot] = useState('');
   const [themes, setThemes] = useState([]);
+  const [currentPlan, setCurrentPlan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const resetLockRef = useRef(false);
+
   const loadSettings = useCallback(async ({ silent = false } = {}) => {
+    if (loadLockRef.current) {
+      return;
+    }
+
     if (!user?.id) {
+      setPrefs(null);
+      setThemes([]);
+      setCurrentPlan(null);
+      setError('Entre na sua conta para acessar as configurações.');
       setLoading(false);
       setRefreshing(false);
       return;
     }
+
+    loadLockRef.current = true;
 
     if (!silent) {
       setLoading(true);
@@ -436,22 +547,44 @@ export default function Settings() {
     setError('');
 
     try {
-      const [preferenceRows, themeRows] = await Promise.all([
+      const [
+        preferenceRows,
+        themeRows,
+        planRows,
+      ] = await Promise.all([
         base44.entities.UserPreference.filter({ user_id: user.id }),
         base44.entities.PresentationTheme.filter(
           { active: true },
           'name',
         ),
+        profile?.plan_id && isProfilePlanActive(profile)
+          ? base44.entities.Plan.filter({
+              id: profile.plan_id,
+            })
+          : Promise.resolve([]),
       ]);
 
+      const normalizedThemes = uniqueById(themeRows).filter(
+        (theme) => theme.active !== false,
+      );
+
+      const currentPreference = selectCurrentRecord(
+        preferenceRows,
+      );
+
       const normalized = normalizePreferences(
-        Array.isArray(preferenceRows) ? preferenceRows[0] : null,
+        currentPreference,
         user.id,
       );
 
       setPrefs(normalized);
       setSavedSnapshot(getComparablePreferences(normalized));
-      setThemes(Array.isArray(themeRows) ? themeRows : []);
+      setThemes(normalizedThemes);
+      setCurrentPlan(
+        uniqueById(planRows).find(
+          (plan) => plan.id === profile?.plan_id,
+        ) || null,
+      );
 
       applyInterfacePreferences(normalized);
     } catch (loadError) {
@@ -463,14 +596,31 @@ export default function Settings() {
         variant: 'destructive',
       });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast, user?.id]);
+  }, [profile, toast, user?.id]);
 
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
+
+  const canUsePremiumThemes = Boolean(
+    isAdmin
+    || (
+      isProfilePlanActive(profile)
+      && currentPlan?.can_use_premium_templates === true
+    ),
+  );
+
+  const isThemeLocked = useCallback(
+    (theme) => Boolean(
+      theme?.is_premium
+      && !canUsePremiumThemes
+    ),
+    [canUsePremiumThemes],
+  );
 
   const selectedTheme = useMemo(
     () => themes.find((theme) => theme.id === prefs?.default_theme_id),
@@ -523,7 +673,12 @@ export default function Settings() {
   };
 
   const handleRefresh = async () => {
-    if (refreshing) {
+    if (
+      refreshing
+      || saving
+      || resetting
+      || loadLockRef.current
+    ) {
       return;
     }
 
@@ -535,10 +690,30 @@ export default function Settings() {
   };
 
   const handleSave = async () => {
-    if (!prefs || !user?.id || saving) {
+    if (
+      !prefs
+      || !user?.id
+      || saving
+      || saveLockRef.current
+    ) {
       return;
     }
 
+    const selected = themes.find(
+      (theme) => theme.id === prefs.default_theme_id,
+    );
+
+    if (selected && isThemeLocked(selected)) {
+      toast({
+        title: 'Tema disponível em um plano superior',
+        description:
+          'Escolha um tema gratuito ou altere seu plano.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
@@ -581,8 +756,18 @@ export default function Settings() {
         saved = await base44.entities.UserPreference.create(payload);
       }
 
+      if (!saved?.id) {
+        throw new Error(
+          'As preferências não retornaram um ID válido.',
+        );
+      }
+
       const normalized = normalizePreferences(
-        { ...prefs, ...saved, ...payload },
+        {
+          ...prefs,
+          ...payload,
+          ...saved,
+        },
         user.id,
       );
 
@@ -603,15 +788,22 @@ export default function Settings() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleReset = async () => {
-    if (!user?.id || resetting) {
+    if (
+      !user?.id
+      || resetting
+      || saving
+      || resetLockRef.current
+    ) {
       return;
     }
 
+    resetLockRef.current = true;
     setResetting(true);
 
     try {
@@ -632,12 +824,42 @@ export default function Settings() {
         description: 'Revise as opções e clique em Salvar configurações.',
       });
     } finally {
+      resetLockRef.current = false;
       setResetting(false);
     }
   };
 
   if (userLoading || loading) {
     return <LoadingState />;
+  }
+
+  if (!user?.id) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center px-4">
+        <Card className="w-full border-dashed">
+          <CardContent className="flex flex-col items-center p-8 text-center sm:p-10">
+            <Settings2 className="h-10 w-10 text-muted-foreground" />
+
+            <h1 className="mt-4 text-xl font-semibold">
+              Entre para acessar as configurações
+            </h1>
+
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Suas preferências de edição e apresentação ficam vinculadas à sua conta.
+            </p>
+
+            <Button
+              className="mt-5"
+              onClick={() => {
+                window.location.href = '/login';
+              }}
+            >
+              Entrar
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   if (!prefs) {
@@ -688,7 +910,12 @@ export default function Settings() {
           <Button
             variant="outline"
             onClick={handleRefresh}
-            disabled={saving || resetting || refreshing}
+            disabled={
+              saving
+              || resetting
+              || refreshing
+              || loadLockRef.current
+            }
             className="w-full sm:w-auto"
           >
             <RefreshCw
@@ -716,7 +943,12 @@ export default function Settings() {
 
           <Button
             onClick={handleSave}
-            disabled={!hasChanges || saving}
+            disabled={
+            !hasChanges
+            || saving
+            || resetting
+            || refreshing
+          }
             className="w-full sm:w-auto"
           >
             {saving ? (
@@ -741,7 +973,17 @@ export default function Settings() {
           <AlertTitle>Falha ao atualizar os dados</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>{error}</span>
-            <Button size="sm" variant="outline" onClick={handleRefresh}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={
+                saving
+                || resetting
+                || refreshing
+                || loadLockRef.current
+              }
+            >
               Tentar novamente
             </Button>
           </AlertDescription>
@@ -780,22 +1022,55 @@ export default function Settings() {
                 <Label htmlFor="default-theme">Tema visual padrão</Label>
                 <Select
                   value={prefs.default_theme_id || 'none'}
-                  onValueChange={(value) => updatePreference(
-                    'default_theme_id',
-                    value === 'none' ? '' : value,
-                  )}
+                  onValueChange={(value) => {
+                    const nextThemeId = value === 'none'
+                      ? ''
+                      : value;
+
+                    const nextTheme = themes.find(
+                      (theme) => theme.id === nextThemeId,
+                    );
+
+                    if (nextTheme && isThemeLocked(nextTheme)) {
+                      toast({
+                        title: 'Tema disponível em um plano superior',
+                        description:
+                          'Escolha outro tema ou confira os planos disponíveis.',
+                      });
+                      return;
+                    }
+
+                    updatePreference(
+                      'default_theme_id',
+                      nextThemeId,
+                    );
+                  }}
                 >
                   <SelectTrigger id="default-theme">
                     <SelectValue placeholder="Selecione um tema" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Usar o tema da apresentação</SelectItem>
-                    {themes.map((theme) => (
-                      <SelectItem key={theme.id} value={theme.id}>
-                        {theme.name}
-                        {theme.is_premium ? ' • Premium' : ''}
-                      </SelectItem>
-                    ))}
+                    {themes.map((theme) => {
+                      const locked = isThemeLocked(theme);
+
+                      return (
+                        <SelectItem
+                          key={theme.id}
+                          value={theme.id}
+                        >
+                          <span className="flex items-center gap-2">
+                            {locked && (
+                              <Lock className="h-3.5 w-3.5" />
+                            )}
+                            <span>
+                              {theme.name}
+                              {theme.is_premium ? ' • Premium' : ''}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
@@ -1126,7 +1401,12 @@ export default function Settings() {
       <div className="sticky bottom-3 z-20 rounded-2xl border bg-background/95 p-3 shadow-lg backdrop-blur sm:hidden">
         <Button
           onClick={handleSave}
-          disabled={!hasChanges || saving}
+          disabled={
+            !hasChanges
+            || saving
+            || resetting
+            || refreshing
+          }
           className="w-full"
         >
           {saving ? (
