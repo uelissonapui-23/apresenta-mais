@@ -100,6 +100,48 @@ function uniqueById(items) {
   return Array.from(map.values());
 }
 
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.started_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function sortNewestFirst(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const dateDifference = getRecordTimestamp(right) - getRecordTimestamp(left);
+
+    if (dateDifference !== 0) {
+      return dateDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
+}
+
 function formatTime(totalSeconds) {
   const safe = Math.max(0, Math.floor(toNumber(totalSeconds)));
   const hours = Math.floor(safe / 3600);
@@ -208,6 +250,7 @@ export default function Rehearsal() {
   const mountedRef = useRef(true);
   const saveInFlightRef = useRef(false);
   const operationInFlightRef = useRef(false);
+  const progressSaveLockRef = useRef(new Set());
 
   const visibleBlocks = useMemo(
     () => sortBlocks(blocks.filter((block) => block.is_hidden !== true)),
@@ -302,9 +345,12 @@ export default function Rehearsal() {
       const safeBlocks = uniqueById(blockRows).filter(
         (block) => !block.presentation_id || block.presentation_id === id,
       );
-      const safeSessions = uniqueById(sessionRows);
-      const safePreferences = uniqueById(preferenceRows);
-      const savedPreference = safePreferences[0] || {};
+      const safeSessions = sortNewestFirst(sessionRows).filter((item) => (
+        item.presentation_id === id
+        && item.user_id === user.id
+        && item.session_type === 'rehearsal'
+      ));
+      const savedPreference = selectCurrentRecord(preferenceRows) || {};
 
       setPreferences({
         ...DEFAULT_PREFERENCES,
@@ -317,7 +363,7 @@ export default function Rehearsal() {
         accessibility_settings_json: savedPreference.accessibility_settings_json || {},
       });
       const active = safeSessions.find(
-        (item) => item.status === 'active' || item.status === 'paused',
+        (item) => ['active', 'paused'].includes(item.status),
       );
 
       setPresentation(presentationData || null);
@@ -347,6 +393,9 @@ export default function Rehearsal() {
   useEffect(() => {
     if (!userLoading && user?.id) {
       loadPage();
+    } else if (!userLoading && !user?.id) {
+      setLoading(false);
+      setLoadError('Entre na sua conta para iniciar o ensaio.');
     }
   }, [loadPage, user?.id, userLoading]);
 
@@ -361,14 +410,14 @@ export default function Rehearsal() {
   }, [isRunning, session?.id]);
 
   const saveSessionSnapshot = useCallback(async ({ force = false } = {}) => {
-    if (!session?.id || saveInFlightRef.current) return;
-    if (!force && !isRunning) return;
+    if (!session?.id || saveInFlightRef.current) return false;
+    if (!force && !isRunning) return false;
 
     saveInFlightRef.current = true;
     setSaving(true);
 
     try {
-      await base44.entities.PresentationSession.update(session.id, {
+      const completedSession = await base44.entities.PresentationSession.update(session.id, {
         elapsed_seconds: elapsedSeconds,
         current_block_id: currentBlock?.id || null,
         completed_count: completedCount,
@@ -385,13 +434,25 @@ export default function Rehearsal() {
         skipped_count: skippedCount,
         status: isRunning ? 'active' : 'paused',
       } : previous);
+
+      return true;
     } catch (error) {
       console.error('Erro ao salvar sessão:', error);
+
+      if (force) {
+        toast({
+          title: 'Não foi possível salvar a sessão',
+          description: 'Confira sua conexão antes de sair do ensaio.',
+          variant: 'destructive',
+        });
+      }
+
+      return false;
     } finally {
       saveInFlightRef.current = false;
       setSaving(false);
     }
-  }, [completedCount, currentBlock?.id, elapsedSeconds, isRunning, session?.id, skippedCount]);
+  }, [completedCount, currentBlock?.id, elapsedSeconds, isRunning, session?.id, skippedCount, toast]);
 
   useEffect(() => {
     if (!session?.id || !isRunning) return undefined;
@@ -503,6 +564,16 @@ export default function Rehearsal() {
 
       if (createdSessionId) {
         try {
+          const createdProgressRows = uniqueById(
+            await base44.entities.SessionBlockProgress.filter({
+              session_id: createdSessionId,
+            }),
+          );
+
+          for (const row of createdProgressRows) {
+            await base44.entities.SessionBlockProgress.delete(row.id);
+          }
+
           await base44.entities.PresentationSession.delete(createdSessionId);
         } catch (rollbackError) {
           console.error('Erro ao remover sessão incompleta:', rollbackError);
@@ -530,8 +601,9 @@ export default function Rehearsal() {
   }, [preferences.confirm_before_restart, startNewSession]);
 
   const continueExistingSession = useCallback(async () => {
-    if (!existingSession?.id) return;
+    if (!existingSession?.id || operationInFlightRef.current) return;
 
+    operationInFlightRef.current = true;
     setSaving(true);
 
     try {
@@ -539,8 +611,19 @@ export default function Rehearsal() {
         { session_id: existingSession.id },
         'order_used',
       );
+
       const validBlockIds = new Set(visibleBlocks.map((block) => block.id));
-      const safeRows = uniqueById(rows).filter((row) => validBlockIds.has(row.block_id));
+      const safeRows = uniqueById(rows)
+        .filter((row) => (
+          row.session_id === existingSession.id
+          && validBlockIds.has(row.block_id)
+        ))
+        .sort((left, right) => (
+          toNumber(left.order_used)
+          - toNumber(right.order_used)
+          || String(left.id).localeCompare(String(right.id))
+        ));
+
       const existingBlockIds = new Set(safeRows.map((row) => row.block_id));
       const missingPayload = visibleBlocks
         .filter((block) => !existingBlockIds.has(block.id))
@@ -554,25 +637,82 @@ export default function Rehearsal() {
         }));
 
       let missingRows = [];
+
       if (missingPayload.length > 0) {
         if (typeof base44.entities.SessionBlockProgress.bulkCreate === 'function') {
           missingRows = await base44.entities.SessionBlockProgress.bulkCreate(missingPayload);
         } else {
           missingRows = await Promise.all(
-            missingPayload.map((item) => base44.entities.SessionBlockProgress.create(item)),
+            missingPayload.map((item) => (
+              base44.entities.SessionBlockProgress.create(item)
+            )),
           );
         }
       }
 
-      const normalizedRows = [...safeRows, ...uniqueById(missingRows)];
-      const currentRow = normalizedRows.find((row) => row.status === 'current');
-      const currentId = currentRow?.block_id || existingSession.current_block_id;
+      const normalizedRows = [
+        ...safeRows,
+        ...uniqueById(missingRows),
+      ];
+
+      let currentId = (
+        existingSession.current_block_id
+        || normalizedRows.find((row) => row.status === 'current')?.block_id
+      );
+
+      if (!validBlockIds.has(currentId)) {
+        currentId = visibleBlocks[0]?.id || null;
+      }
+
+      const now = new Date().toISOString();
+
+      for (const row of normalizedRows) {
+        const shouldBeCurrent = row.block_id === currentId;
+
+        if (shouldBeCurrent && row.status !== 'current') {
+          const updated = await base44.entities.SessionBlockProgress.update(
+            row.id,
+            {
+              status: 'current',
+              started_at: row.started_at || now,
+              completed_at: null,
+              visit_count: Math.max(1, toNumber(row.visit_count)),
+            },
+          );
+
+          Object.assign(row, updated || {
+            status: 'current',
+            started_at: row.started_at || now,
+            completed_at: null,
+            visit_count: Math.max(1, toNumber(row.visit_count)),
+          });
+        } else if (!shouldBeCurrent && row.status === 'current') {
+          const updated = await base44.entities.SessionBlockProgress.update(
+            row.id,
+            { status: 'pending' },
+          );
+
+          Object.assign(row, updated || { status: 'pending' });
+        }
+      }
+
       const index = Math.max(
         0,
         visibleBlocks.findIndex((block) => block.id === currentId),
       );
 
-      setSession(existingSession);
+      const resumedSession = await base44.entities.PresentationSession.update(
+        existingSession.id,
+        {
+          current_block_id: currentId,
+          status: existingSession.status === 'paused' ? 'paused' : 'active',
+        },
+      );
+
+      setSession(resumedSession || {
+        ...existingSession,
+        current_block_id: currentId,
+      });
       setProgressRows(normalizedRows);
       setCurrentIndex(index);
       setElapsedSeconds(toNumber(existingSession.elapsed_seconds));
@@ -582,17 +722,23 @@ export default function Rehearsal() {
       console.error('Erro ao continuar ensaio:', error);
       toast({
         title: 'Não foi possível continuar',
-        description: 'A sessão será preservada. Tente novamente.',
+        description: 'A sessão foi preservada. Tente novamente.',
         variant: 'destructive',
       });
     } finally {
+      operationInFlightRef.current = false;
       setSaving(false);
     }
   }, [existingSession, toast, visibleBlocks]);
 
   const updateProgressRow = useCallback(async (blockId, status, extra = {}) => {
     const row = progressMap[blockId];
-    if (!row?.id) return;
+
+    if (!row?.id || progressSaveLockRef.current.has(row.id)) {
+      return null;
+    }
+
+    progressSaveLockRef.current.add(row.id);
 
     const now = new Date().toISOString();
     const payload = {
@@ -602,6 +748,7 @@ export default function Rehearsal() {
 
     if (status === 'current') {
       payload.started_at = row.started_at || now;
+      payload.completed_at = null;
       payload.visit_count = toNumber(row.visit_count) + 1;
     }
 
@@ -609,43 +756,91 @@ export default function Rehearsal() {
       payload.completed_at = now;
     }
 
-    await base44.entities.SessionBlockProgress.update(row.id, payload);
+    try {
+      const updated = await base44.entities.SessionBlockProgress.update(
+        row.id,
+        payload,
+      );
 
-    setProgressRows((current) => current.map((item) => (
-      item.id === row.id ? { ...item, ...payload } : item
-    )));
-  }, [progressMap]);
+      const nextRow = updated || {
+        ...row,
+        ...payload,
+      };
+
+      setProgressRows((current) => current.map((item) => (
+        item.id === row.id ? nextRow : item
+      )));
+
+      return nextRow;
+    } catch (error) {
+      console.error('Erro ao salvar progresso do ensaio:', error);
+
+      toast({
+        title: 'Não foi possível salvar o tópico',
+        description: 'A alteração não foi aplicada. Tente novamente.',
+        variant: 'destructive',
+      });
+
+      return null;
+    } finally {
+      progressSaveLockRef.current.delete(row.id);
+    }
+  }, [progressMap, toast]);
 
   const setOnlyCurrentBlock = useCallback(async (targetIndex) => {
     if (targetIndex < 0 || targetIndex >= visibleBlocks.length) return;
 
     const target = visibleBlocks[targetIndex];
+    const targetRow = progressMap[target.id];
+
+    if (!targetRow?.id) {
+      throw new Error('O progresso do tópico de destino não foi encontrado.');
+    }
+
     const otherCurrentRows = progressRows.filter(
       (row) => row.status === 'current' && row.block_id !== target.id,
     );
 
-    await Promise.all(
-      otherCurrentRows.map((row) => base44.entities.SessionBlockProgress.update(row.id, {
-        status: 'pending',
-      })),
-    );
+    const changedRows = [];
 
-    setProgressRows((current) => current.map((row) => {
-      if (row.status === 'current' && row.block_id !== target.id) {
-        return { ...row, status: 'pending' };
+    try {
+      for (const row of otherCurrentRows) {
+        const updated = await base44.entities.SessionBlockProgress.update(
+          row.id,
+          { status: 'pending' },
+        );
+
+        changedRows.push(updated || {
+          ...row,
+          status: 'pending',
+        });
       }
-      return row;
-    }));
 
-    await updateProgressRow(target.id, 'current');
-    setCurrentIndex(targetIndex);
+      const targetUpdated = await updateProgressRow(target.id, 'current');
 
-    if (session?.id) {
-      await base44.entities.PresentationSession.update(session.id, {
-        current_block_id: target.id,
-      });
+      if (!targetUpdated) {
+        throw new Error('Não foi possível ativar o tópico de destino.');
+      }
+
+      if (session?.id) {
+        await base44.entities.PresentationSession.update(session.id, {
+          current_block_id: target.id,
+        });
+      }
+
+      setProgressRows((current) => current.map((row) => {
+        const changed = changedRows.find((item) => item.id === row.id);
+        if (changed) return changed;
+        if (row.id === targetUpdated.id) return targetUpdated;
+        return row;
+      }));
+
+      setCurrentIndex(targetIndex);
+    } catch (error) {
+      console.error('Erro ao alterar tópico atual:', error);
+      throw error;
     }
-  }, [progressRows, session?.id, updateProgressRow, visibleBlocks]);
+  }, [progressMap, progressRows, session?.id, updateProgressRow, visibleBlocks]);
 
   const moveToNext = useCallback(async ({ status = 'completed' } = {}) => {
     if (!currentBlock || operationInFlightRef.current) return;
@@ -701,8 +896,17 @@ export default function Rehearsal() {
   }, [currentIndex, setOnlyCurrentBlock, toast]);
 
   const markCurrent = useCallback(async (status) => {
-    if (!currentBlock) return;
-    await updateProgressRow(currentBlock.id, status);
+    if (!currentBlock || operationInFlightRef.current) return;
+
+    operationInFlightRef.current = true;
+    setSaving(true);
+
+    try {
+      await updateProgressRow(currentBlock.id, status);
+    } finally {
+      operationInFlightRef.current = false;
+      setSaving(false);
+    }
   }, [currentBlock, updateProgressRow]);
 
   const pauseSession = useCallback(async () => {
@@ -783,7 +987,7 @@ export default function Rehearsal() {
     try {
       const now = new Date().toISOString();
 
-      await base44.entities.PresentationSession.update(session.id, {
+      const completedSession = await base44.entities.PresentationSession.update(session.id, {
         status: 'completed',
         finished_at: now,
         elapsed_seconds: elapsedSeconds,
@@ -798,6 +1002,12 @@ export default function Rehearsal() {
         last_opened_at: now,
       });
 
+      setSession((previous) => previous ? {
+        ...previous,
+        ...(completedSession || {}),
+        status: 'completed',
+        finished_at: now,
+      } : previous);
       setIsRunning(false);
       setShowEndDialog(false);
       navigate(`/session-history/${id}`);
