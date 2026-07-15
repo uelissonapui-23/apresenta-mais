@@ -47,7 +47,7 @@ import { Switch } from '@/components/ui/switch';
 const DEFAULT_ACCESSIBILITY = {
   high_contrast: false,
   reduce_motion: false,
-  larger_controls: false,
+  large_controls: false,
   left_aligned_text: true,
   increased_spacing: false,
 };
@@ -114,26 +114,48 @@ const DETAIL_OPTIONS = [
 ];
 
 function parseAccessibility(value) {
-  if (!value) {
-    return { ...DEFAULT_ACCESSIBILITY };
+  let parsed = {};
+
+  if (value && typeof value === 'object') {
+    parsed = value;
+  } else if (value) {
+    try {
+      const candidate = JSON.parse(value);
+
+      parsed = (
+        candidate
+        && typeof candidate === 'object'
+      )
+        ? candidate
+        : {};
+    } catch {
+      parsed = {};
+    }
   }
 
-  if (typeof value === 'object') {
-    return {
-      ...DEFAULT_ACCESSIBILITY,
-      ...value,
-    };
-  }
+  /*
+  |--------------------------------------------------------------------------
+  | Compatibilidade
+  |--------------------------------------------------------------------------
+  |
+  | Versões anteriores da página Settings usaram "larger_controls",
+  | enquanto Rehearsal e PresentMode utilizam "large_controls".
+  | Normalizamos para a chave realmente consumida pelo aplicativo e
+  | preservamos também os dados de personalização salvos no onboarding.
+  |
+  */
 
-  try {
-    const parsed = JSON.parse(value);
-    return {
-      ...DEFAULT_ACCESSIBILITY,
-      ...(parsed && typeof parsed === 'object' ? parsed : {}),
-    };
-  } catch {
-    return { ...DEFAULT_ACCESSIBILITY };
-  }
+  const largeControls = Boolean(
+    parsed.large_controls
+    || parsed.larger_controls
+    || parsed.controls_larger
+  );
+
+  return {
+    ...DEFAULT_ACCESSIBILITY,
+    ...parsed,
+    large_controls: largeControls,
+  };
 }
 
 function normalizePreferences(raw, userId) {
@@ -176,6 +198,50 @@ function getComparablePreferences(prefs) {
     confirm_before_restart: Boolean(prefs.confirm_before_restart),
     accessibility,
   });
+}
+
+function applyInterfacePreferences(prefs) {
+  if (
+    typeof document === 'undefined'
+    || !prefs
+  ) {
+    return;
+  }
+
+  const accessibility = parseAccessibility(
+    prefs.accessibility_settings_json,
+  );
+
+  document.documentElement.classList.toggle(
+    'dark',
+    Boolean(prefs.use_dark_mode),
+  );
+
+  document.documentElement.classList.toggle(
+    'a11y-high-contrast',
+    Boolean(accessibility.high_contrast),
+  );
+
+  document.documentElement.classList.toggle(
+    'a11y-reduce-motion',
+    Boolean(accessibility.reduce_motion),
+  );
+
+  document.documentElement.classList.toggle(
+    'a11y-large-controls',
+    Boolean(accessibility.large_controls),
+  );
+
+  document.documentElement.classList.toggle(
+    'a11y-increased-spacing',
+    Boolean(accessibility.increased_spacing),
+  );
+
+  document.documentElement.dataset.textAlignment = (
+    accessibility.left_aligned_text
+      ? 'left'
+      : 'center'
+  );
 }
 
 function LoadingState() {
@@ -354,15 +420,19 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
-  const loadSettings = useCallback(async () => {
+  const loadSettings = useCallback(async ({ silent = false } = {}) => {
     if (!user?.id) {
       setLoading(false);
+      setRefreshing(false);
       return;
     }
 
-    setLoading(true);
+    if (!silent) {
+      setLoading(true);
+    }
     setError('');
 
     try {
@@ -382,6 +452,8 @@ export default function Settings() {
       setPrefs(normalized);
       setSavedSnapshot(getComparablePreferences(normalized));
       setThemes(Array.isArray(themeRows) ? themeRows : []);
+
+      applyInterfacePreferences(normalized);
     } catch (loadError) {
       console.error('Erro ao carregar configurações:', loadError);
       setError('Não foi possível carregar suas configurações agora.');
@@ -392,6 +464,7 @@ export default function Settings() {
       });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [toast, user?.id]);
 
@@ -449,6 +522,18 @@ export default function Settings() {
     });
   };
 
+  const handleRefresh = async () => {
+    if (refreshing) {
+      return;
+    }
+
+    setRefreshing(true);
+
+    await loadSettings({
+      silent: true,
+    });
+  };
+
   const handleSave = async () => {
     if (!prefs || !user?.id || saving) {
       return;
@@ -470,9 +555,19 @@ export default function Settings() {
         show_progress: Boolean(prefs.show_progress),
         auto_mark_completed: Boolean(prefs.auto_mark_completed),
         confirm_before_restart: Boolean(prefs.confirm_before_restart),
-        accessibility_settings_json: JSON.stringify(
-          parseAccessibility(prefs.accessibility_settings_json),
-        ),
+        accessibility_settings_json: JSON.stringify((() => {
+          const accessibility = parseAccessibility(
+            prefs.accessibility_settings_json,
+          );
+
+          const {
+            larger_controls: _legacyLargerControls,
+            controls_larger: _legacyControlsLarger,
+            ...normalizedAccessibility
+          } = accessibility;
+
+          return normalizedAccessibility;
+        })()),
       };
 
       let saved;
@@ -493,6 +588,8 @@ export default function Settings() {
 
       setPrefs(normalized);
       setSavedSnapshot(getComparablePreferences(normalized));
+
+      applyInterfacePreferences(normalized);
 
       toast({
         title: 'Configurações salvas',
@@ -528,6 +625,7 @@ export default function Settings() {
       );
 
       setPrefs(resetPrefs);
+      applyInterfacePreferences(resetPrefs);
 
       toast({
         title: 'Padrões restaurados',
@@ -589,8 +687,23 @@ export default function Settings() {
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
           <Button
             variant="outline"
+            onClick={handleRefresh}
+            disabled={saving || resetting || refreshing}
+            className="w-full sm:w-auto"
+          >
+            <RefreshCw
+              className={[
+                'mr-2 h-4 w-4',
+                refreshing ? 'animate-spin' : '',
+              ].join(' ')}
+            />
+            Atualizar
+          </Button>
+
+          <Button
+            variant="outline"
             onClick={handleReset}
-            disabled={saving || resetting}
+            disabled={saving || resetting || refreshing}
             className="w-full sm:w-auto"
           >
             {resetting ? (
@@ -628,7 +741,7 @@ export default function Settings() {
           <AlertTitle>Falha ao atualizar os dados</AlertTitle>
           <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <span>{error}</span>
-            <Button size="sm" variant="outline" onClick={loadSettings}>
+            <Button size="sm" variant="outline" onClick={handleRefresh}>
               Tentar novamente
             </Button>
           </AlertDescription>
@@ -938,9 +1051,9 @@ export default function Settings() {
                 icon={Settings2}
                 title="Controles maiores"
                 description="Aumenta áreas de toque e botões nas telas de ensaio e apresentação."
-                checked={accessibility.larger_controls}
+                checked={accessibility.large_controls}
                 onCheckedChange={(value) => updateAccessibility(
-                  'larger_controls',
+                  'large_controls',
                   value,
                 )}
               />
