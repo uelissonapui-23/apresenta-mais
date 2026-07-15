@@ -5,8 +5,6 @@ import { Megaphone, X } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
 
-import { Button } from '@/components/ui/button';
-
 const EXCLUDED_ROUTE_PREFIXES = [
   '/present/',
   '/rehearsal/',
@@ -21,37 +19,85 @@ const EXCLUDED_ROUTE_PREFIXES = [
 
 const SESSION_STORAGE_KEY = 'apresenta_ad_dismissed';
 
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) map.set(row.id, row);
+  }
+
+  return [...map.values()];
+}
+
 function isExcludedRoute(pathname) {
   return EXCLUDED_ROUTE_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix),
   );
 }
 
-function getDeviceType() {
-  if (typeof window === 'undefined') return 'desktop';
+function getViewport() {
+  if (typeof window === 'undefined') {
+    return { device: 'desktop', orientation: 'landscape' };
+  }
 
   const width = window.innerWidth;
+  const height = window.innerHeight;
 
-  if (width < 768) return 'mobile';
-  if (width < 1024) return 'tablet';
-
-  return 'desktop';
+  return {
+    device: width < 768 ? 'mobile' : width < 1024 ? 'tablet' : 'desktop',
+    orientation: height > width ? 'portrait' : 'landscape',
+  };
 }
 
-function getOrientation() {
-  if (typeof window === 'undefined') return 'portrait';
-  return window.innerHeight > window.innerWidth ? 'portrait' : 'landscape';
+function normalizeRoute(route) {
+  const value = String(route || '').trim();
+  if (!value) return '';
+  return value.startsWith('/') ? value : `/${value}`;
 }
 
-function parseJsonField(value, fallback) {
-  if (!value) return fallback;
-  if (typeof value === 'object') return value;
+function parseExcludedRoutes(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(normalizeRoute).filter(Boolean))];
+  }
+
+  if (typeof value === 'object') {
+    return [];
+  }
+
+  const raw = String(value).trim();
+  if (!raw) return [];
 
   try {
-    return JSON.parse(value);
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return [...new Set(parsed.map(normalizeRoute).filter(Boolean))];
+    }
   } catch {
-    return fallback;
+    // The admin page stores one route per line; continue with text parsing.
   }
+
+  return [...new Set(
+    raw
+      .split(/\r?\n|,/)
+      .map(normalizeRoute)
+      .filter(Boolean),
+  )];
+}
+
+function routeMatches(pathname, route) {
+  if (!route) return false;
+  if (route === '/') return pathname === '/';
+
+  const normalizedRoute = route.endsWith('/')
+    ? route.slice(0, -1)
+    : route;
+
+  return (
+    pathname === normalizedRoute
+    || pathname.startsWith(`${normalizedRoute}/`)
+  );
 }
 
 function shouldPlacementShow(placement, { device, orientation, pageKey }) {
@@ -66,7 +112,11 @@ function shouldPlacementShow(placement, { device, orientation, pageKey }) {
   if (orientation === 'portrait' && placement.show_in_portrait === false) return false;
   if (orientation === 'landscape' && placement.show_in_landscape === false) return false;
 
-  if (placement.page_key && placement.page_key !== 'all' && placement.page_key !== pageKey) {
+  if (
+    placement.page_key
+    && placement.page_key !== 'all'
+    && placement.page_key !== pageKey
+  ) {
     return false;
   }
 
@@ -74,13 +124,43 @@ function shouldPlacementShow(placement, { device, orientation, pageKey }) {
 }
 
 function isRouteExcluded(placement, pathname) {
-  const excluded = parseJsonField(placement.excluded_routes_json, []);
+  return parseExcludedRoutes(placement?.excluded_routes_json)
+    .some((route) => routeMatches(pathname, route));
+}
 
-  if (!Array.isArray(excluded) || excluded.length === 0) return false;
+function normalizeDate(value) {
+  if (!value) return null;
 
-  return excluded.some(
-    (route) => pathname === route || pathname.startsWith(String(route)),
-  );
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isActivePlan(profile) {
+  if (!profile) return false;
+  if (profile.permanent_ad_free) return true;
+
+  const status = String(profile.plan_status || 'none').toLowerCase();
+  if (status === 'permanent') return true;
+  if (status !== 'active') return false;
+
+  const expiration = normalizeDate(profile.plan_expires_at);
+  return !expiration || expiration.getTime() > Date.now();
+}
+
+function userShouldSeeAds(profile, plan) {
+  if (!profile) return true;
+  if (profile.permanent_ad_free) return false;
+
+  const status = String(profile.plan_status || 'none').toLowerCase();
+  if (status === 'permanent') return false;
+
+  if (!isActivePlan(profile)) return true;
+
+  if (plan?.id) {
+    return plan.shows_ads !== false;
+  }
+
+  return profile.shows_ads !== false;
 }
 
 export default function AdSlot({
@@ -93,34 +173,82 @@ export default function AdSlot({
 
   const [config, setConfig] = useState(null);
   const [placement, setPlacement] = useState(null);
+  const [plan, setPlan] = useState(null);
   const [dismissed, setDismissed] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [viewport, setViewport] = useState(getViewport);
+
+  useEffect(() => {
+    const handleViewportChange = () => setViewport(getViewport());
+
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
+
+    return () => {
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('orientationchange', handleViewportChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    setDismissed(false);
+  }, [location.pathname, placementCode]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadAdData() {
-      if (isExcludedRoute(location.pathname)) {
-        setLoaded(true);
+      setLoaded(false);
+
+      if (!placementCode || isExcludedRoute(location.pathname)) {
+        if (!cancelled) {
+          setConfig(null);
+          setPlacement(null);
+          setPlan(null);
+          setLoaded(true);
+        }
         return;
       }
 
       try {
-        const [configRows, placementRows] = await Promise.all([
-          base44.entities.AdConfiguration.filter({ active: true }, '-updated_date', 5),
+        const planPromise = profile?.plan_id
+          ? base44.entities.Plan.filter({ id: profile.plan_id }, '-updated_date', 5)
+          : Promise.resolve([]);
+
+        const [configRows, placementRows, planRows] = await Promise.all([
+          base44.entities.AdConfiguration.filter(
+            { active: true },
+            '-updated_date',
+            20,
+          ),
           base44.entities.AdPlacement.filter(
             { code: placementCode, active: true },
             'order_index',
-            10,
+            20,
           ),
+          planPromise,
         ]);
 
         if (cancelled) return;
 
-        setConfig(Array.isArray(configRows) && configRows.length > 0 ? configRows[0] : null);
-        setPlacement(Array.isArray(placementRows) && placementRows.length > 0 ? placementRows[0] : null);
-      } catch {
-        // Fail silently — ads should never break the page
+        const configs = uniqueById(configRows);
+        const placements = uniqueById(placementRows);
+        const plans = uniqueById(planRows);
+
+        setConfig(configs[0] || null);
+        setPlacement(
+          placements.find((item) => item.enabled !== false)
+          || placements[0]
+          || null,
+        );
+        setPlan(plans.find((item) => item.id === profile?.plan_id) || null);
+      } catch (error) {
+        console.warn('Não foi possível carregar o espaço de anúncio:', error);
+        if (!cancelled) {
+          setConfig(null);
+          setPlacement(null);
+          setPlan(null);
+        }
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -131,82 +259,87 @@ export default function AdSlot({
     return () => {
       cancelled = true;
     };
-  }, [placementCode, location.pathname]);
+  }, [location.pathname, placementCode, profile?.plan_id]);
 
   const visible = useMemo(() => {
-    if (dismissed) return false;
-    if (!loaded) return false;
+    if (dismissed || !loaded || !placementCode) return false;
     if (isExcludedRoute(location.pathname)) return false;
 
-    // Admins never see ads
-    if (isAdmin) return false;
-
-    // Check global ad config
     if (!config || config.ads_enabled === false || config.active === false) {
       return false;
     }
 
-    // Check placement
+    const isTestMode = config.test_mode !== false;
+
+    if (isAdmin && !(isTestMode && config.admin_preview_enabled !== false)) {
+      return false;
+    }
+
     if (!placement) return false;
 
-    const device = getDeviceType();
-    const orientation = getOrientation();
-
-    if (!shouldPlacementShow(placement, { device, orientation, pageKey })) {
+    if (!shouldPlacementShow(placement, {
+      device: viewport.device,
+      orientation: viewport.orientation,
+      pageKey,
+    })) {
       return false;
     }
 
     if (isRouteExcluded(placement, location.pathname)) return false;
 
-    // Check user plan — ad-free users don't see ads
-    if (profile?.permanent_ad_free) return false;
+    if (!isAdmin && !userShouldSeeAds(profile, plan)) return false;
 
-    const planStatus = String(profile?.plan_status || 'none').toLowerCase();
-    if (planStatus === 'permanent') return false;
-
-    if (planStatus === 'active') {
-      const expiresAt = profile?.plan_expires_at ? new Date(profile.plan_expires_at) : null;
-      const isValid = !expiresAt || expiresAt.getTime() > Date.now();
-      if (isValid && profile?.shows_ads === false) return false;
-    }
-
-    // Check session-based dismissal
     try {
       const sessionDismissed = window.sessionStorage.getItem(
         `${SESSION_STORAGE_KEY}:${placementCode}`,
       );
+
       if (sessionDismissed === 'true') return false;
     } catch {
-      // sessionStorage may be unavailable
+      // sessionStorage may be unavailable.
     }
 
     return true;
-  }, [config, dismissed, isAdmin, loaded, location.pathname, pageKey, placement, placementCode, profile]);
+  }, [
+    config,
+    dismissed,
+    isAdmin,
+    loaded,
+    location.pathname,
+    pageKey,
+    placement,
+    placementCode,
+    plan,
+    profile,
+    viewport.device,
+    viewport.orientation,
+  ]);
 
   const handleDismiss = () => {
     setDismissed(true);
+
     try {
       window.sessionStorage.setItem(
         `${SESSION_STORAGE_KEY}:${placementCode}`,
         'true',
       );
     } catch {
-      // Ignore storage errors
+      // Ignore storage errors.
     }
   };
 
-  // Reserve space to prevent layout shift, but don't show the ad
-  if (!visible) {
-    return null;
-  }
+  if (!visible) return null;
 
   const isTestMode = config?.test_mode !== false;
+  const isAdminPreview = isAdmin && isTestMode;
 
   return (
     <div
       className={`relative flex min-h-[72px] items-center justify-center overflow-hidden rounded-xl border border-dashed border-border/60 bg-muted/30 px-4 py-3 ${className}`}
       data-ad-slot={placementCode}
       data-ad-placement={placement?.id}
+      data-ad-device={viewport.device}
+      data-ad-orientation={viewport.orientation}
     >
       <button
         type="button"
@@ -220,11 +353,16 @@ export default function AdSlot({
       <div className="flex flex-col items-center gap-1 text-center">
         <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
           <Megaphone className="h-3 w-3" />
-          {isTestMode ? 'Espaço publicitário (modo teste)' : 'Publicidade'}
+          {isAdminPreview
+            ? 'Prévia administrativa de anúncio'
+            : isTestMode
+              ? 'Espaço publicitário (modo teste)'
+              : 'Publicidade'}
         </div>
+
         <p className="text-xs text-muted-foreground/60">
           {isTestMode
-            ? 'Este espaço está reservado para anúncios. Em modo de teste, nenhum anúncio real é exibido.'
+            ? `Posição: ${placement?.name || placementCode}`
             : 'Anúncio'}
         </p>
       </div>
