@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -65,6 +65,59 @@ const STATUS_OPTIONS = [
 
 function normalizeRows(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function uniqueById(value) {
+  const map = new Map();
+
+  for (const item of normalizeRows(value)) {
+    if (item?.id) map.set(item.id, item);
+  }
+
+  return [...map.values()];
+}
+
+function buildPlanFields(plan, changedByUserId) {
+  const now = new Date();
+  const changedAt = now.toISOString();
+
+  if (!plan?.id) {
+    return {
+      plan_id: '',
+      plan_start_date: '',
+      plan_expires_at: '',
+      plan_status: 'none',
+      permanent_ad_free: false,
+      shows_ads: true,
+      plan_last_changed_at: changedAt,
+      plan_changed_by_user_id: changedByUserId || '',
+      plan_activation_reason: 'manual_admin_change',
+      plan_request_status: '',
+    };
+  }
+
+  const isLifetime = plan.billing_period === 'lifetime';
+  const durationDays = Number(plan.duration_days) || 0;
+  let expiresAt = '';
+
+  if (!isLifetime && durationDays > 0) {
+    const expiration = new Date(now);
+    expiration.setDate(expiration.getDate() + durationDays);
+    expiresAt = expiration.toISOString().split('T')[0];
+  }
+
+  return {
+    plan_id: plan.id,
+    plan_start_date: changedAt.split('T')[0],
+    plan_expires_at: expiresAt,
+    plan_status: isLifetime ? 'permanent' : 'active',
+    permanent_ad_free: isLifetime || plan.shows_ads === false,
+    shows_ads: isLifetime ? false : plan.shows_ads !== false,
+    plan_last_changed_at: changedAt,
+    plan_changed_by_user_id: changedByUserId || '',
+    plan_activation_reason: 'manual_admin_change',
+    plan_request_status: 'approved',
+  };
 }
 
 function normalizeText(value) {
@@ -253,6 +306,7 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const saveLockRef = useRef(false);
   const [loadError, setLoadError] = useState('');
 
   const [query, setQuery] = useState('');
@@ -287,8 +341,8 @@ export default function AdminUsers() {
         base44.entities.Plan.filter({}, 'name', 200),
       ]);
 
-      setProfiles(normalizeRows(profileRows));
-      setPlans(normalizeRows(planRows));
+      setProfiles(uniqueById(profileRows));
+      setPlans(uniqueById(planRows));
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
       setLoadError('Não foi possível carregar os usuários agora.');
@@ -372,7 +426,7 @@ export default function AdminUsers() {
   };
 
   const handleSave = async () => {
-    if (!editingProfile?.id || saving) return;
+    if (!editingProfile?.id || saving || saveLockRef.current) return;
 
     const trimmedName = form.name.trim();
     if (!trimmedName) {
@@ -424,16 +478,32 @@ export default function AdminUsers() {
       return;
     }
 
+    const selectedPlan = form.plan_id ? planMap[form.plan_id] : null;
+
+    if (form.plan_id && (!selectedPlan?.id || selectedPlan.active === false)) {
+      toast({
+        title: 'Plano inválido ou inativo',
+        description: 'Escolha um plano ativo antes de salvar o usuário.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    saveLockRef.current = true;
     setSaving(true);
+
+    const planChanged = (editingProfile.plan_id || '') !== (form.plan_id || '');
 
     const payload = {
       name: trimmedName,
       phone: form.phone.trim(),
       avatar_url: form.avatar_url.trim(),
       role: form.role,
-      plan_id: form.plan_id || '',
       onboarding_completed: Boolean(form.onboarding_completed),
       active: Boolean(form.active),
+      ...(planChanged
+        ? buildPlanFields(selectedPlan, user?.id)
+        : { plan_id: form.plan_id || '' }),
     };
 
     try {
@@ -459,6 +529,7 @@ export default function AdminUsers() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
