@@ -579,7 +579,9 @@ export default function GuidedCreation() {
           presentation_id: id,
           guided_question_id: question.id,
           answer_text: Array.isArray(value) ? value.join('\n') : String(value),
-          answer_json: Array.isArray(value) || typeof value === 'boolean' ? value : null,
+          answer_json: Array.isArray(value) || typeof value === 'boolean'
+            ? JSON.stringify(value)
+            : '',
         };
 
         if (existing?.id) {
@@ -740,12 +742,6 @@ export default function GuidedCreation() {
         return;
       }
 
-      if (replaceExisting && existingBlocks?.length > 0) {
-        for (const block of existingBlocks) {
-          await base44.entities.PresentationBlock.delete(block.id);
-        }
-      }
-
       const blockTypes = await base44.entities.BlockType.filter({ active: true }, 'order_index');
       const blocks = buildBlocks(blockTypes || []);
 
@@ -753,7 +749,48 @@ export default function GuidedCreation() {
         throw new Error('Nenhum tipo de bloco ativo foi encontrado.');
       }
 
-      await base44.entities.PresentationBlock.bulkCreate(blocks);
+      let removedBlocksBackup = [];
+
+      if (replaceExisting && existingBlocks?.length > 0) {
+        removedBlocksBackup = existingBlocks.map((block) => ({
+          presentation_id: block.presentation_id,
+          parent_id: block.parent_id || null,
+          block_type_id: block.block_type_id || null,
+          title: block.title || 'Tópico sem título',
+          summary: block.summary || '',
+          content: block.content || '',
+          additional_content: block.additional_content || '',
+          presenter_notes: block.presenter_notes || '',
+          order_index: Number(block.order_index) || 0,
+          depth_level: Number(block.depth_level) || 0,
+          importance_level: Number(block.importance_level) || 3,
+          estimated_duration_seconds: Number(block.estimated_duration_seconds) || 60,
+          is_essential: Boolean(block.is_essential),
+          is_hidden: Boolean(block.is_hidden),
+          is_collapsed: Boolean(block.is_collapsed),
+          show_to_audience: block.show_to_audience !== false,
+          icon: block.icon || '',
+          background_style: block.background_style || '',
+          text_style: block.text_style || '',
+        }));
+
+        for (const block of existingBlocks) {
+          await base44.entities.PresentationBlock.delete(block.id);
+        }
+      }
+
+      try {
+        await base44.entities.PresentationBlock.bulkCreate(blocks);
+      } catch (blockCreationError) {
+        if (removedBlocksBackup.length > 0) {
+          try {
+            await base44.entities.PresentationBlock.bulkCreate(removedBlocksBackup);
+          } catch (restoreError) {
+            console.error('Erro ao restaurar estrutura anterior:', restoreError);
+          }
+        }
+        throw blockCreationError;
+      }
       await base44.entities.Presentation.update(id, {
         status: 'draft',
         progress_percentage: 0,
