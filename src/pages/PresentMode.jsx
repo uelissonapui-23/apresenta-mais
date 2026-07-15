@@ -98,6 +98,51 @@ function uniqueById(rows) {
   });
 }
 
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function sortNewestFirst(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const dateDifference = (
+      getRecordTimestamp(right)
+      - getRecordTimestamp(left)
+    );
+
+    if (dateDifference !== 0) {
+      return dateDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
+}
+
 function formatTime(totalSeconds) {
   const safeSeconds = Math.max(0, Math.floor(asNumber(totalSeconds)));
   const hours = Math.floor(safeSeconds / 3600);
@@ -260,6 +305,7 @@ export default function PresentMode() {
   const blockStartedAtRef = useRef(Date.now());
   const loadingRef = useRef(false);
   const operationRef = useRef(false);
+  const persistLockRef = useRef(false);
 
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
@@ -386,9 +432,15 @@ export default function PresentMode() {
     forceStatus,
     finishedAt,
     notes,
+    silent = true,
   } = {}) => {
     const activeSession = sessionRef.current;
-    if (!activeSession?.id) return;
+
+    if (!activeSession?.id || persistLockRef.current) {
+      return false;
+    }
+
+    persistLockRef.current = true;
 
     const current = visibleBlocks[currentIndexRef.current];
     const rows = Array.from(progressRef.current.values());
@@ -396,22 +448,48 @@ export default function PresentMode() {
     const skipped = rows.filter((row) => row.status === 'skipped').length;
 
     try {
-      await base44.entities.PresentationSession.update(activeSession.id, {
-        elapsed_seconds: elapsedRef.current,
-        current_block_id: current?.id || '',
-        completed_count: completed,
-        skipped_count: skipped,
-        status: forceStatus || (running ? 'active' : 'paused'),
-        paused_at: forceStatus === 'paused'
-          ? new Date().toISOString()
-          : activeSession.paused_at || '',
-        finished_at: finishedAt || activeSession.finished_at || '',
-        notes: notes ?? activeSession.notes ?? '',
-      });
+      const updated = await base44.entities.PresentationSession.update(
+        activeSession.id,
+        {
+          elapsed_seconds: elapsedRef.current,
+          current_block_id: current?.id || '',
+          completed_count: completed,
+          skipped_count: skipped,
+          status: forceStatus || (running ? 'active' : 'paused'),
+          paused_at: forceStatus === 'paused'
+            ? new Date().toISOString()
+            : activeSession.paused_at || '',
+          finished_at: finishedAt || activeSession.finished_at || '',
+          notes: notes ?? activeSession.notes ?? '',
+        },
+      );
+
+      if (updated?.id) {
+        setSession((currentSession) => (
+          currentSession?.id === updated.id
+            ? { ...currentSession, ...updated }
+            : currentSession
+        ));
+      }
+
+      return true;
     } catch (saveError) {
       console.error('Erro ao salvar sessão:', saveError);
+
+      if (!silent) {
+        toast({
+          title: 'Não foi possível salvar a sessão',
+          description:
+            'Confira sua conexão antes de sair da apresentação.',
+          variant: 'destructive',
+        });
+      }
+
+      return false;
+    } finally {
+      persistLockRef.current = false;
     }
-  }, [running, visibleBlocks]);
+  }, [running, toast, visibleBlocks]);
 
   const createProgressRows = useCallback(async (
     createdSession,
@@ -543,7 +621,7 @@ export default function PresentMode() {
       setPresentation(presentationRow);
       setBlocks(ordered);
 
-      const preference = uniqueById(preferenceRows)[0] || null;
+      const preference = selectCurrentRecord(preferenceRows);
 
       if (preference) {
         setFontSize(clamp(
@@ -581,8 +659,13 @@ export default function PresentMode() {
         return;
       }
 
-      const activeSession = uniqueById(sessionRows)
-        .find((row) => row.status === 'active' || row.status === 'paused');
+      const activeSession = sortNewestFirst(sessionRows)
+        .find((row) => (
+          row.presentation_id === id
+          && row.user_id === user.id
+          && row.session_type === 'presentation'
+          && ['active', 'paused'].includes(row.status)
+        ));
 
       if (activeSession) {
         const savedProgressRows = uniqueById(
@@ -590,9 +673,17 @@ export default function PresentMode() {
             { session_id: activeSession.id },
             'order_used',
           ),
-        );
+        ).filter((row) => row.session_id === activeSession.id);
+
         const validBlockIds = new Set(ordered.map((block) => block.id));
-        const savedProgress = savedProgressRows.filter((row) => validBlockIds.has(row.block_id));
+
+        const savedProgress = savedProgressRows
+          .filter((row) => validBlockIds.has(row.block_id))
+          .sort((left, right) => (
+            asNumber(left.order_used)
+            - asNumber(right.order_used)
+            || String(left.id).localeCompare(String(right.id))
+          ));
         const existingBlockIds = new Set(savedProgress.map((row) => row.block_id));
         const missingBlocks = ordered.filter((block) => !existingBlockIds.has(block.id));
 
@@ -611,11 +702,55 @@ export default function PresentMode() {
           savedProgress.push(createdRow);
         }
 
-        const currentId = activeSession.current_block_id
+        let currentId = activeSession.current_block_id
           || savedProgress.find((row) => row.status === 'current')?.block_id;
+
+        if (!validBlockIds.has(currentId)) {
+          currentId = ordered[0]?.id || '';
+        }
+
+        const now = new Date().toISOString();
+
+        for (const row of savedProgress) {
+          const shouldBeCurrent = row.block_id === currentId;
+
+          if (shouldBeCurrent && row.status !== 'current') {
+            const updated = await base44.entities.SessionBlockProgress.update(
+              row.id,
+              {
+                status: 'current',
+                started_at: row.started_at || now,
+                completed_at: '',
+                visit_count: Math.max(1, asNumber(row.visit_count)),
+              },
+            );
+
+            Object.assign(row, updated || {
+              status: 'current',
+              started_at: row.started_at || now,
+              completed_at: '',
+              visit_count: Math.max(1, asNumber(row.visit_count)),
+            });
+          } else if (!shouldBeCurrent && row.status === 'current') {
+            const updated = await base44.entities.SessionBlockProgress.update(
+              row.id,
+              {
+                status: 'pending',
+              },
+            );
+
+            Object.assign(row, updated || {
+              status: 'pending',
+            });
+          }
+        }
+
+        const currentIdFromSession = currentId;
         const index = Math.max(
           0,
-          ordered.findIndex((block) => block.id === currentId),
+          ordered.findIndex(
+            (block) => block.id === currentIdFromSession,
+          ),
         );
 
         setPendingSession({
@@ -650,6 +785,9 @@ export default function PresentMode() {
   useEffect(() => {
     if (!userLoading && user?.id) {
       loadPage();
+    } else if (!userLoading && !user?.id) {
+      setLoading(false);
+      setError('Entre na sua conta para iniciar a apresentação.');
     }
   }, [loadPage, user?.id, userLoading]);
 
@@ -718,17 +856,31 @@ export default function PresentMode() {
     )));
 
     try {
-      return await base44.entities.SessionBlockProgress.update(
+      const updated = await base44.entities.SessionBlockProgress.update(
         existing.id,
         updatedData,
       );
+
+      return updated || {
+        ...existing,
+        ...updatedData,
+      };
     } catch (updateError) {
       console.error('Erro ao atualizar progresso:', updateError);
+
+      setProgressRows((current) => current.map((row) => (
+        row.id === existing.id
+          ? existing
+          : row
+      )));
+
       toast({
         title: 'Não foi possível salvar o progresso',
-        description: 'A alteração visual foi mantida e será tentada novamente.',
+        description:
+          'A alteração foi desfeita para manter a sessão consistente.',
         variant: 'destructive',
       });
+
       return null;
     }
   }, [toast]);
@@ -748,15 +900,16 @@ export default function PresentMode() {
     }
 
     operationRef.current = true;
+
     try {
       const oldIndex = currentIndexRef.current;
-    const oldBlock = visibleBlocks[oldIndex];
-    const newBlock = visibleBlocks[targetIndex];
-    const now = new Date().toISOString();
-    const spentSeconds = Math.max(
-      0,
-      Math.round((Date.now() - blockStartedAtRef.current) / 1000),
-    );
+      const oldBlock = visibleBlocks[oldIndex];
+      const newBlock = visibleBlocks[targetIndex];
+      const now = new Date().toISOString();
+      const spentSeconds = Math.max(
+        0,
+        Math.round((Date.now() - blockStartedAtRef.current) / 1000),
+      );
 
     if (oldBlock) {
       const oldProgress = progressRef.current.get(oldBlock.id);
@@ -799,6 +952,18 @@ export default function PresentMode() {
 
       setRunning(true);
       resetControlsTimer();
+    } catch (navigationError) {
+      console.error(
+        'Erro ao trocar de tópico:',
+        navigationError,
+      );
+
+      toast({
+        title: 'Não foi possível trocar de tópico',
+        description:
+          'A sessão foi mantida no tópico atual.',
+        variant: 'destructive',
+      });
     } finally {
       operationRef.current = false;
     }
@@ -839,21 +1004,40 @@ export default function PresentMode() {
 
   const togglePause = useCallback(async () => {
     if (operationRef.current) return;
+
     operationRef.current = true;
     const nextRunning = !running;
-    setRunning(nextRunning);
 
-    if (sessionRef.current?.id) {
-      await base44.entities.PresentationSession.update(sessionRef.current.id, {
-        status: nextRunning ? 'active' : 'paused',
-        paused_at: nextRunning ? '' : new Date().toISOString(),
-        elapsed_seconds: elapsedRef.current,
+    try {
+      if (sessionRef.current?.id) {
+        await base44.entities.PresentationSession.update(
+          sessionRef.current.id,
+          {
+            status: nextRunning ? 'active' : 'paused',
+            paused_at: nextRunning ? '' : new Date().toISOString(),
+            elapsed_seconds: elapsedRef.current,
+          },
+        );
+      }
+
+      setRunning(nextRunning);
+      resetControlsTimer();
+    } catch (pauseError) {
+      console.error(
+        'Erro ao pausar ou continuar a apresentação:',
+        pauseError,
+      );
+
+      toast({
+        title: 'Não foi possível atualizar a sessão',
+        description:
+          'Tente novamente antes de continuar.',
+        variant: 'destructive',
       });
+    } finally {
+      operationRef.current = false;
     }
-
-    resetControlsTimer();
-    operationRef.current = false;
-  }, [resetControlsTimer, running]);
+  }, [resetControlsTimer, running, toast]);
 
   const handleContinueSession = useCallback(() => {
     applySessionState(pendingSession);
@@ -863,7 +1047,6 @@ export default function PresentMode() {
 
   const handleRestartSession = useCallback(async () => {
     if (visibleBlocks.length === 0 || operationRef.current) return;
-    operationRef.current = true;
     operationRef.current = true;
     setSaving(true);
 
@@ -926,7 +1109,11 @@ export default function PresentMode() {
 
   const handleEndPresentation = useCallback(async () => {
     if (operationRef.current) return;
+
+    operationRef.current = true;
+
     if (!sessionRef.current?.id) {
+      operationRef.current = false;
       navigate(`/session-history/${id}`);
       return;
     }
@@ -945,11 +1132,16 @@ export default function PresentMode() {
         });
       }
 
-      await persistSession({
+      const sessionSaved = await persistSession({
         forceStatus: 'completed',
         finishedAt: new Date().toISOString(),
         notes: endNotes.trim(),
+        silent: false,
       });
+
+      if (!sessionSaved) {
+        throw new Error('A sessão não pôde ser finalizada.');
+      }
 
       try {
         await base44.entities.Presentation.update(id, {
