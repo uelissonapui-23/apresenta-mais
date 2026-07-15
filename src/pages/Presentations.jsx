@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   Archive,
@@ -677,6 +677,7 @@ export default function Presentations() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [busyAction, setBusyAction] = useState(null);
+  const actionLockRef = useRef(false);
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -1039,17 +1040,25 @@ export default function Presentations() {
   };
 
   const handleDuplicate = async (presentation) => {
-    if (!presentation?.id || busyAction || !user?.id) return;
+    if (!presentation?.id || busyAction || actionLockRef.current || !user?.id) return;
 
+    actionLockRef.current = true;
     setBusyAction({ type: 'duplicate', presentationId: presentation.id });
     let duplicatedPresentation = null;
 
     try {
-      const originalBlocks = await base44.entities.PresentationBlock.filter(
-        { presentation_id: presentation.id },
-        'order_index',
-        PAGE_LIMIT,
-      );
+      const [originalBlocks, originalTagLinks] = await Promise.all([
+        base44.entities.PresentationBlock.filter(
+          { presentation_id: presentation.id },
+          'order_index',
+          PAGE_LIMIT,
+        ),
+        base44.entities.PresentationTag.filter(
+          { presentation_id: presentation.id },
+          '-created_date',
+          PAGE_LIMIT,
+        ),
+      ]);
 
       const cleanPresentation = removeSystemFields(presentation);
       duplicatedPresentation = await base44.entities.Presentation.create({
@@ -1087,26 +1096,59 @@ export default function Presentations() {
         idMap[sourceBlock.id] = createdBlock.id;
       }
 
+      const copiedTagLinks = [];
+      for (const sourceLink of uniqueById(originalTagLinks)) {
+        if (!sourceLink?.tag_id) continue;
+
+        const createdLink = await base44.entities.PresentationTag.create({
+          presentation_id: duplicatedPresentation.id,
+          tag_id: sourceLink.tag_id,
+        });
+
+        copiedTagLinks.push(createdLink);
+      }
+
       setPresentations((current) => [duplicatedPresentation, ...current]);
+      setPresentationTagLinks((current) => [
+        ...current,
+        ...copiedTagLinks,
+      ]);
       toast({
         title: 'Apresentação duplicada',
-        description: `${sourceBlocks.length} bloco(s) foram copiados.`,
+        description: `${sourceBlocks.length} bloco(s) e ${uniqueById(originalTagLinks).length} etiqueta(s) foram copiados.`,
       });
     } catch (error) {
       console.error('Erro ao duplicar apresentação:', error);
 
       if (duplicatedPresentation?.id) {
         try {
-          const partialBlocks = await base44.entities.PresentationBlock.filter(
-            { presentation_id: duplicatedPresentation.id },
-            'order_index',
-            PAGE_LIMIT,
-          );
-          await Promise.allSettled(
-            (partialBlocks || []).map((block) => (
-              block?.id ? base44.entities.PresentationBlock.delete(block.id) : null
+          const [partialBlocks, partialTagLinks] = await Promise.all([
+            base44.entities.PresentationBlock.filter(
+              { presentation_id: duplicatedPresentation.id },
+              'order_index',
+              PAGE_LIMIT,
+            ),
+            base44.entities.PresentationTag.filter(
+              { presentation_id: duplicatedPresentation.id },
+              '-created_date',
+              PAGE_LIMIT,
+            ),
+          ]);
+
+          await Promise.all(
+            uniqueById(partialTagLinks).map((link) => (
+              base44.entities.PresentationTag.delete(link.id)
             )),
           );
+
+          const rollbackBlocks = uniqueById(partialBlocks).sort((left, right) => (
+            (Number(right.depth_level) || 0)
+            - (Number(left.depth_level) || 0)
+          ));
+
+          for (const block of rollbackBlocks) {
+            await base44.entities.PresentationBlock.delete(block.id);
+          }
           await base44.entities.Presentation.delete(duplicatedPresentation.id);
         } catch (rollbackError) {
           console.error('Erro ao remover cópia incompleta:', rollbackError);
@@ -1119,22 +1161,21 @@ export default function Presentations() {
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyAction(null);
     }
   };
 
-  const deleteRows = async (entity, rows) => {
-    const safeRows = Array.isArray(rows) ? rows : [];
-    await Promise.allSettled(
-      safeRows
-        .filter((row) => row?.id)
-        .map((row) => entity.delete(row.id)),
-    );
+  const deleteRowsStrict = async (entity, rows) => {
+    for (const row of uniqueById(rows)) {
+      await entity.delete(row.id);
+    }
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget?.id || busyAction) return;
+    if (!deleteTarget?.id || busyAction || actionLockRef.current) return;
 
+    actionLockRef.current = true;
     const presentationId = deleteTarget.id;
     setBusyAction({ type: 'delete', presentationId });
 
@@ -1176,14 +1217,25 @@ export default function Presentations() {
         )),
       );
 
-      await deleteRows(
+      await deleteRowsStrict(
         base44.entities.SessionBlockProgress,
         progressGroups.flat(),
       );
-      await deleteRows(base44.entities.PresentationSession, presentationSessions);
-      await deleteRows(base44.entities.GuidedAnswer, guidedAnswers);
-      await deleteRows(base44.entities.PresentationTag, presentationTags);
-      await deleteRows(base44.entities.PresentationBlock, blocks);
+      await deleteRowsStrict(base44.entities.PresentationSession, presentationSessions);
+      await deleteRowsStrict(base44.entities.GuidedAnswer, guidedAnswers);
+      await deleteRowsStrict(base44.entities.PresentationTag, presentationTags);
+
+      const orderedBlocks = uniqueById(blocks).sort((left, right) => {
+        const depthDifference = (Number(right.depth_level) || 0)
+          - (Number(left.depth_level) || 0);
+
+        if (depthDifference !== 0) return depthDifference;
+
+        return (Number(right.order_index) || 0)
+          - (Number(left.order_index) || 0);
+      });
+
+      await deleteRowsStrict(base44.entities.PresentationBlock, orderedBlocks);
       await base44.entities.Presentation.delete(presentationId);
 
       setPresentations((current) => current.filter((item) => item.id !== presentationId));
@@ -1200,6 +1252,7 @@ export default function Presentations() {
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyAction(null);
     }
   };
