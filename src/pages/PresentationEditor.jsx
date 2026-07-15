@@ -126,6 +126,68 @@ function getDescendantIds(blocks, blockId) {
   return ids;
 }
 
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function sortDeepestFirst(blocks) {
+  return [...blocks].sort((left, right) => {
+    const depthDifference = (
+      safeNumber(right.depth_level)
+      - safeNumber(left.depth_level)
+    );
+
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return safeNumber(right.order_index) - safeNumber(left.order_index);
+  });
+}
+
+function updateBranchDepth(blocks, rootId, depthDelta) {
+  const descendantIds = new Set(getDescendantIds(blocks, rootId));
+
+  return blocks.map((block) => {
+    if (!descendantIds.has(block.id)) {
+      return block;
+    }
+
+    return {
+      ...block,
+      depth_level: Math.max(
+        0,
+        safeNumber(block.depth_level) + depthDelta,
+      ),
+    };
+  });
+}
+
 function buildFlatTree(blocks) {
   const ordered = [];
   const visited = new Set();
@@ -235,10 +297,10 @@ export default function PresentationEditor() {
           throw new Error('access_denied');
         }
 
-        const preference =
-          Array.isArray(preferenceRows) && preferenceRows.length > 0
-            ? preferenceRows[0]
-            : DEFAULT_PREFERENCES;
+        const preference = (
+          selectCurrentRecord(preferenceRows)
+          || DEFAULT_PREFERENCES
+        );
 
         const normalizedBlocks = buildFlatTree(
           uniqueById(blockRows),
@@ -279,6 +341,9 @@ export default function PresentationEditor() {
   useEffect(() => {
     if (!userLoading && user?.id) {
       loadEditor();
+    } else if (!userLoading && !user?.id) {
+      setLoading(false);
+      setLoadError('Entre na sua conta para editar esta apresentação.');
     }
   }, [loadEditor, user?.id, userLoading]);
 
@@ -430,6 +495,25 @@ export default function PresentationEditor() {
     setDeleteTarget(block);
   };
 
+  const deleteBlockRelations = useCallback(async (blockIds) => {
+    const uniqueIds = [...new Set(blockIds.filter(Boolean))];
+
+    for (const blockId of uniqueIds) {
+      const [attachments, references] = await Promise.all([
+        base44.entities.BlockAttachment.filter({ block_id: blockId }),
+        base44.entities.BlockReference.filter({ block_id: blockId }),
+      ]);
+
+      for (const attachment of uniqueById(attachments)) {
+        await base44.entities.BlockAttachment.delete(attachment.id);
+      }
+
+      for (const reference of uniqueById(references)) {
+        await base44.entities.BlockReference.delete(reference.id);
+      }
+    }
+  }, []);
+
   const handleDeleteBlock = async () => {
     if (!deleteTarget || operationLockRef.current) return;
 
@@ -443,10 +527,16 @@ export default function PresentationEditor() {
 
       if (deleteMode === 'delete_all') {
         const descendantIds = getDescendantIds(blocks, deleteTarget.id);
-        const idsToDelete = [...descendantIds.reverse(), deleteTarget.id];
+        const idsToDelete = [...descendantIds, deleteTarget.id];
 
-        for (const blockId of idsToDelete) {
-          await base44.entities.PresentationBlock.delete(blockId);
+        await deleteBlockRelations(idsToDelete);
+
+        const rowsToDelete = sortDeepestFirst(
+          blocks.filter((block) => idsToDelete.includes(block.id)),
+        );
+
+        for (const block of rowsToDelete) {
+          await base44.entities.PresentationBlock.delete(block.id);
         }
 
         let nextBlocks = blocks.filter(
@@ -461,28 +551,52 @@ export default function PresentationEditor() {
             )
           : -1;
 
-        await Promise.all(
-          directChildren.map((child) =>
-            base44.entities.PresentationBlock.update(child.id, {
-              parent_id: targetParent,
-              depth_level: parentDepth + 1,
-            }),
-          ),
+        const depthDelta = (parentDepth + 1) - (
+          safeNumber(deleteTarget.depth_level) + 1
         );
 
+        for (const child of directChildren) {
+          await base44.entities.PresentationBlock.update(child.id, {
+            parent_id: targetParent,
+            depth_level: parentDepth + 1,
+          });
+
+          const descendants = getDescendantIds(blocks, child.id)
+            .map((descendantId) => blocks.find((item) => item.id === descendantId))
+            .filter(Boolean);
+
+          for (const descendant of descendants) {
+            await base44.entities.PresentationBlock.update(descendant.id, {
+              depth_level: Math.max(
+                0,
+                safeNumber(descendant.depth_level) + depthDelta,
+              ),
+            });
+          }
+        }
+
+        await deleteBlockRelations([deleteTarget.id]);
         await base44.entities.PresentationBlock.delete(deleteTarget.id);
 
-        let nextBlocks = blocks
-          .filter((block) => block.id !== deleteTarget.id)
-          .map((block) =>
-            block.parent_id === deleteTarget.id
-              ? {
-                  ...block,
-                  parent_id: targetParent,
-                  depth_level: parentDepth + 1,
-                }
-              : block,
-          );
+        let nextBlocks = blocks.filter(
+          (block) => block.id !== deleteTarget.id,
+        );
+
+        for (const child of directChildren) {
+          nextBlocks = nextBlocks.map((block) => {
+            if (block.id === child.id) {
+              return {
+                ...block,
+                parent_id: targetParent,
+                depth_level: parentDepth + 1,
+              };
+            }
+
+            return block;
+          });
+
+          nextBlocks = updateBranchDepth(nextBlocks, child.id, depthDelta);
+        }
 
         nextBlocks = await normalizeSiblingOrder(targetParent, nextBlocks);
         setBlocksAndNormalize(nextBlocks);
@@ -496,7 +610,7 @@ export default function PresentationEditor() {
       setSaveStatus('error');
       toast({
         title: 'Não foi possível excluir o bloco',
-        description: 'Nenhum conteúdo foi removido da tela sem confirmação.',
+        description: 'O editor foi atualizado para refletir o estado real dos dados.',
         variant: 'destructive',
       });
       await loadEditor({ silent: true });
@@ -506,27 +620,64 @@ export default function PresentationEditor() {
     }
   };
 
-  const duplicateBranch = useCallback(
-    async (sourceBlockId, newParentId, titleSuffix = '') => {
-      const source = blocks.find((block) => block.id === sourceBlockId);
-      if (!source) return null;
+  const copyBlockRelations = useCallback(async (sourceBlockId, targetBlockId) => {
+    const [attachments, references] = await Promise.all([
+      base44.entities.BlockAttachment.filter({ block_id: sourceBlockId }),
+      base44.entities.BlockReference.filter({ block_id: sourceBlockId }),
+    ]);
 
-      const siblings = getDirectChildren(blocks, newParentId);
+    for (const attachment of uniqueById(attachments)) {
+      await base44.entities.BlockAttachment.create({
+        block_id: targetBlockId,
+        attachment_type: attachment.attachment_type || 'link',
+        file_url: attachment.file_url || '',
+        title: attachment.title || '',
+        description: attachment.description || '',
+        order_index: safeNumber(attachment.order_index),
+      });
+    }
+
+    for (const reference of uniqueById(references)) {
+      await base44.entities.BlockReference.create({
+        block_id: targetBlockId,
+        reference_type: reference.reference_type || 'Outro',
+        title: reference.title || '',
+        reference_text: reference.reference_text || '',
+        source: reference.source || '',
+        url: reference.url || '',
+      });
+    }
+  }, []);
+
+  const duplicateBranch = useCallback(
+    async (
+      sourceBlockId,
+      newParentId,
+      orderIndex,
+      titleSuffix,
+      createdBlocks,
+    ) => {
+      const source = blocks.find((block) => block.id === sourceBlockId);
+      if (!source) {
+        throw new Error('Bloco de origem não encontrado.');
+      }
+
+      const parent = newParentId
+        ? createdBlocks.find((block) => block.id === newParentId)
+          || blocks.find((block) => block.id === newParentId)
+        : null;
+
       const copy = await base44.entities.PresentationBlock.create({
         presentation_id: id,
         parent_id: normalizeParentId(newParentId),
         block_type_id: source.block_type_id,
-        title: `${source.title || 'Bloco'}${titleSuffix}`,
+        title: `${source.title || 'Bloco'}${titleSuffix || ''}`,
         summary: source.summary || '',
         content: source.content || '',
         additional_content: source.additional_content || '',
         presenter_notes: source.presenter_notes || '',
-        order_index: siblings.length,
-        depth_level: newParentId
-          ? safeNumber(
-              blocks.find((block) => block.id === newParentId)?.depth_level,
-            ) + 1
-          : 0,
+        order_index: orderIndex,
+        depth_level: parent ? safeNumber(parent.depth_level) + 1 : 0,
         importance_level: safeNumber(source.importance_level, 3),
         estimated_duration_seconds: safeNumber(
           source.estimated_duration_seconds,
@@ -538,17 +689,24 @@ export default function PresentationEditor() {
         show_to_audience: source.show_to_audience !== false,
       });
 
-      const children = getDirectChildren(blocks, sourceBlockId);
-      const created = [copy];
+      createdBlocks.push(copy);
+      await copyBlockRelations(source.id, copy.id);
 
-      for (const child of children) {
-        const childCreated = await duplicateBranch(child.id, copy.id, '');
-        if (Array.isArray(childCreated)) created.push(...childCreated);
+      const children = getDirectChildren(blocks, sourceBlockId);
+
+      for (let index = 0; index < children.length; index += 1) {
+        await duplicateBranch(
+          children[index].id,
+          copy.id,
+          index,
+          '',
+          createdBlocks,
+        );
       }
 
-      return created;
+      return copy;
     },
-    [blocks, id],
+    [blocks, copyBlockRelations, id],
   );
 
   const handleDuplicate = async (blockId) => {
@@ -560,23 +718,50 @@ export default function PresentationEditor() {
     setProcessing(true);
     setSaveStatus('saving');
 
+    const createdBlocks = [];
+
     try {
-      const created = await duplicateBranch(
+      const destinationSiblings = getDirectChildren(
+        blocks,
+        source.parent_id,
+      );
+
+      await duplicateBranch(
         blockId,
         normalizeParentId(source.parent_id),
+        destinationSiblings.length,
         ' (cópia)',
+        createdBlocks,
       );
+
       setBlocksAndNormalize((current) => [
         ...current,
-        ...(Array.isArray(created) ? created : []),
+        ...createdBlocks,
       ]);
       setSaveStatus('saved');
-      toast({ title: 'Bloco duplicado com seus subtópicos' });
+      toast({ title: 'Bloco duplicado com conteúdo, anexos e subtópicos' });
     } catch (error) {
       console.error('Erro ao duplicar bloco:', error);
+
+      try {
+        await deleteBlockRelations(
+          createdBlocks.map((block) => block.id),
+        );
+
+        for (const block of sortDeepestFirst(createdBlocks)) {
+          await base44.entities.PresentationBlock.delete(block.id);
+        }
+      } catch (rollbackError) {
+        console.error(
+          'Erro ao remover a duplicação incompleta:',
+          rollbackError,
+        );
+      }
+
       setSaveStatus('error');
       toast({
         title: 'Não foi possível duplicar o bloco',
+        description: 'A cópia incompleta foi removida sempre que possível.',
         variant: 'destructive',
       });
       await loadEditor({ silent: true });
@@ -672,9 +857,21 @@ export default function PresentationEditor() {
       };
 
       await base44.entities.PresentationBlock.update(blockId, updates);
+
+      const descendants = getDescendantIds(blocks, blockId)
+        .map((descendantId) => blocks.find((item) => item.id === descendantId))
+        .filter(Boolean);
+
+      for (const descendant of descendants) {
+        await base44.entities.PresentationBlock.update(descendant.id, {
+          depth_level: safeNumber(descendant.depth_level) + 1,
+        });
+      }
+
       let nextBlocks = blocks.map((item) =>
         item.id === blockId ? { ...item, ...updates } : item,
       );
+      nextBlocks = updateBranchDepth(nextBlocks, blockId, 1);
       nextBlocks = await normalizeSiblingOrder(block.parent_id, nextBlocks);
       setBlocksAndNormalize(nextBlocks);
       setSaveStatus('saved');
@@ -719,9 +916,24 @@ export default function PresentationEditor() {
       };
 
       await base44.entities.PresentationBlock.update(blockId, updates);
+
+      const descendants = getDescendantIds(blocks, blockId)
+        .map((descendantId) => blocks.find((item) => item.id === descendantId))
+        .filter(Boolean);
+
+      for (const descendant of descendants) {
+        await base44.entities.PresentationBlock.update(descendant.id, {
+          depth_level: Math.max(
+            0,
+            safeNumber(descendant.depth_level) - 1,
+          ),
+        });
+      }
+
       let nextBlocks = blocks.map((item) =>
         item.id === blockId ? { ...item, ...updates } : item,
       );
+      nextBlocks = updateBranchDepth(nextBlocks, blockId, -1);
       nextBlocks = await normalizeSiblingOrder(newParentId, nextBlocks);
       nextBlocks = await normalizeSiblingOrder(parent.id, nextBlocks);
       setBlocksAndNormalize(nextBlocks);
