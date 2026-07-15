@@ -15,12 +15,66 @@ function normalizeRole(value) {
     .toLowerCase();
 }
 
-function getFirstProfile(rows) {
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCanonicalProfile(rows, userId) {
   if (!Array.isArray(rows) || rows.length === 0) {
     return null;
   }
 
-  return rows[0] || null;
+  const validProfiles = rows.filter(
+    (profile) => (
+      profile?.id
+      && (!userId || profile.user_id === userId)
+    ),
+  );
+
+  if (validProfiles.length === 0) {
+    return null;
+  }
+
+  return [...validProfiles].sort((left, right) => {
+    const activeDifference = (
+      Number(right.active !== false)
+      - Number(left.active !== false)
+    );
+
+    if (activeDifference !== 0) {
+      return activeDifference;
+    }
+
+    const onboardingDifference = (
+      Number(right.onboarding_completed === true)
+      - Number(left.onboarding_completed === true)
+    );
+
+    if (onboardingDifference !== 0) {
+      return onboardingDifference;
+    }
+
+    const updatedDifference = (
+      getRecordTimestamp(right)
+      - getRecordTimestamp(left)
+    );
+
+    if (updatedDifference !== 0) {
+      return updatedDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  })[0];
 }
 
 function createReadableError(error) {
@@ -95,7 +149,7 @@ export default function useCurrentUser() {
         user_id: user.id,
       });
 
-      return getFirstProfile(rows);
+      return selectCanonicalProfile(rows, user.id);
     },
 
     enabled: Boolean(
@@ -246,13 +300,36 @@ export default function useCurrentUser() {
   */
 
   const refreshCurrentUser = async () => {
-    await checkUserAuth();
+    const refreshedUser = await checkUserAuth({
+      force: true,
+    });
 
-    if (user?.id) {
-      return refreshProfile();
+    if (!refreshedUser?.id) {
+      queryClient.removeQueries({
+        queryKey: [PROFILE_QUERY_KEY],
+      });
+
+      return null;
     }
 
-    return null;
+    const rows = await base44.entities.UserProfile.filter({
+      user_id: refreshedUser.id,
+    });
+
+    const nextProfile = selectCanonicalProfile(
+      rows,
+      refreshedUser.id,
+    );
+
+    queryClient.setQueryData(
+      [
+        PROFILE_QUERY_KEY,
+        refreshedUser.id,
+      ],
+      nextProfile,
+    );
+
+    return nextProfile;
   };
 
   return {
