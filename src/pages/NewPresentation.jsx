@@ -439,8 +439,12 @@ export default function NewPresentation() {
   }, [toast, user?.id]);
 
   useEffect(() => {
+    if (userLoading) {
+      return;
+    }
+
     loadOptions();
-  }, [loadOptions]);
+  }, [loadOptions, userLoading]);
 
   const selectedType = useMemo(
     () => types.find((item) => item.id === form.presentation_type_id),
@@ -465,7 +469,7 @@ export default function NewPresentation() {
     }
 
     if (mode === 'duplicate') {
-      navigate('/presentations?mode=duplicate');
+      navigate('/presentations');
       return;
     }
 
@@ -496,6 +500,10 @@ export default function NewPresentation() {
   };
 
   const handleCreate = async () => {
+    if (saving) {
+      return;
+    }
+
     const errorMessage = validateForm();
 
     if (errorMessage) {
