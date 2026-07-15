@@ -1,0 +1,70 @@
+{
+  "name": "AdConfiguration",
+  "type": "object",
+  "properties": {
+    "ads_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "provider": {
+      "type": "string",
+      "default": "none"
+    },
+    "environment": {
+      "type": "string",
+      "enum": [
+        "production",
+        "staging",
+        "test"
+      ],
+      "default": "test"
+    },
+    "banner_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "interstitial_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "rewarded_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "test_mode": {
+      "type": "boolean",
+      "default": true
+    },
+    "default_banner_code": {
+      "type": "string"
+    },
+    "default_interstitial_code": {
+      "type": "string"
+    },
+    "default_rewarded_code": {
+      "type": "string"
+    },
+    "frequency_limit": {
+      "type": "number",
+      "default": 3
+    },
+    "minimum_interval_minutes": {
+      "type": "number",
+      "default": 5
+    },
+    "admin_preview_enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "updated_by_user_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "ads_enabled"
+  ]
+}

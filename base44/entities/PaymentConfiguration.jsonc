@@ -1,0 +1,63 @@
+{
+  "name": "PaymentConfiguration",
+  "type": "object",
+  "properties": {
+    "pix_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "pix_key": {
+      "type": "string"
+    },
+    "pix_key_type": {
+      "type": "string",
+      "enum": [
+        "cpf",
+        "cnpj",
+        "email",
+        "phone",
+        "random"
+      ],
+      "default": "random"
+    },
+    "recipient_name": {
+      "type": "string"
+    },
+    "recipient_document": {
+      "type": "string"
+    },
+    "bank_name": {
+      "type": "string"
+    },
+    "instructions": {
+      "type": "string"
+    },
+    "support_instructions": {
+      "type": "string"
+    },
+    "plan_payment_instructions": {
+      "type": "string"
+    },
+    "minimum_support_amount": {
+      "type": "number",
+      "default": 0
+    },
+    "suggested_amounts": {
+      "type": "string"
+    },
+    "proof_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    },
+    "updated_by_user_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pix_enabled"
+  ]
+}

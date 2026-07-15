@@ -25,6 +25,46 @@
     "plan_id": {
       "type": "string"
     },
+    "plan_start_date": {
+      "type": "string"
+    },
+    "plan_expires_at": {
+      "type": "string"
+    },
+    "plan_status": {
+      "type": "string",
+      "enum": [
+        "none",
+        "active",
+        "expired",
+        "suspended",
+        "permanent"
+      ],
+      "default": "none"
+    },
+    "permanent_ad_free": {
+      "type": "boolean",
+      "default": false
+    },
+    "plan_last_changed_at": {
+      "type": "string"
+    },
+    "plan_changed_by_user_id": {
+      "type": "string"
+    },
+    "plan_note": {
+      "type": "string"
+    },
+    "plan_activation_reason": {
+      "type": "string"
+    },
+    "shows_ads": {
+      "type": "boolean",
+      "default": true
+    },
+    "plan_request_status": {
+      "type": "string"
+    },
     "onboarding_completed": {
       "type": "boolean",
       "default": false

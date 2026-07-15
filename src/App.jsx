@@ -139,6 +139,23 @@ const AdminTips = lazy(
   () => import('@/pages/admin/AdminTips'),
 );
 
+// Monetização
+const MyPlan = lazy(
+  () => import('@/pages/MyPlan'),
+);
+const AdminPlanRequests = lazy(
+  () => import('@/pages/admin/AdminPlanRequests'),
+);
+const AdminSupportContributions = lazy(
+  () => import('@/pages/admin/AdminSupportContributions'),
+);
+const AdminAds = lazy(
+  () => import('@/pages/admin/AdminAds'),
+);
+const AdminPaymentConfig = lazy(
+  () => import('@/pages/admin/AdminPaymentConfig'),
+);
+
 /*
 |--------------------------------------------------------------------------
 | Tela de carregamento
@@ -391,6 +408,11 @@ function AppRoutes() {
               element={<Profile />}
             />
 
+            <Route
+              path="/my-plan"
+              element={<MyPlan />}
+            />
+
             {/*
             |--------------------------------------------------------------------------
             | Compatibilidade com links antigos
@@ -472,6 +494,26 @@ function AppRoutes() {
               <Route
                 path="/admin/tips"
                 element={<AdminTips />}
+              />
+
+              <Route
+                path="/admin/plan-requests"
+                element={<AdminPlanRequests />}
+              />
+
+              <Route
+                path="/admin/support-contributions"
+                element={<AdminSupportContributions />}
+              />
+
+              <Route
+                path="/admin/ads"
+                element={<AdminAds />}
+              />
+
+              <Route
+                path="/admin/payment-config"
+                element={<AdminPaymentConfig />}
               />
             </Route>
           </Route>

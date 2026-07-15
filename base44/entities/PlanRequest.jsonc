@@ -1,0 +1,80 @@
+{
+  "name": "PlanRequest",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": "string"
+    },
+    "plan_id": {
+      "type": "string"
+    },
+    "request_type": {
+      "type": "string",
+      "enum": [
+        "subscription",
+        "renewal",
+        "plan_change",
+        "permanent_unlock",
+        "other"
+      ],
+      "default": "subscription"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "under_review",
+        "approved",
+        "rejected",
+        "cancelled",
+        "expired"
+      ],
+      "default": "pending"
+    },
+    "amount_informed": {
+      "type": "number",
+      "default": 0
+    },
+    "payment_method": {
+      "type": "string",
+      "default": "pix"
+    },
+    "payer_name": {
+      "type": "string"
+    },
+    "payment_date": {
+      "type": "string"
+    },
+    "proof_url": {
+      "type": "string"
+    },
+    "proof_filename": {
+      "type": "string"
+    },
+    "user_note": {
+      "type": "string"
+    },
+    "admin_note": {
+      "type": "string"
+    },
+    "analyzed_at": {
+      "type": "string"
+    },
+    "analyzed_by_user_id": {
+      "type": "string"
+    },
+    "activation_date": {
+      "type": "string"
+    },
+    "expiration_date": {
+      "type": "string"
+    },
+    "rejection_reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_id",
+    "plan_id"
+  ]
+}

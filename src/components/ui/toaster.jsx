@@ -9,13 +9,20 @@ import {
 } from "@/components/ui/toast";
 
 export function Toaster() {
-  const { toasts } = useToast();
+  const { toasts, pause, resume } = useToast();
 
   return (
     <ToastProvider>
       {toasts.map(function ({ id, title, description, action, ...props }) {
         return (
-          <Toast key={id} {...props}>
+          <Toast
+            key={id}
+            {...props}
+            onMouseEnter={() => pause(id)}
+            onMouseLeave={() => resume(id)}
+            onFocus={() => pause(id)}
+            onBlur={() => resume(id)}
+          >
             <div className="grid gap-1">
               {title && <ToastTitle>{title}</ToastTitle>}
               {description && (
@@ -30,4 +37,4 @@ export function Toaster() {
       <ToastViewport />
     </ToastProvider>
   );
-} 
+}

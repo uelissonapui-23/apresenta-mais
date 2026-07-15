@@ -46,6 +46,43 @@
       "type": "boolean",
       "default": false
     },
+    "shows_ads": {
+      "type": "boolean",
+      "default": true
+    },
+    "highlight": {
+      "type": "boolean",
+      "default": false
+    },
+    "recommended": {
+      "type": "boolean",
+      "default": false
+    },
+    "color": {
+      "type": "string",
+      "default": "#3B82F6"
+    },
+    "instructions": {
+      "type": "string"
+    },
+    "explanatory_text": {
+      "type": "string"
+    },
+    "duration_days": {
+      "type": "number",
+      "default": 0
+    },
+    "manual_renewal": {
+      "type": "boolean",
+      "default": true
+    },
+    "admin_notes": {
+      "type": "string"
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    },
     "active": {
       "type": "boolean",
       "default": true

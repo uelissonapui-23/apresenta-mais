@@ -1,0 +1,89 @@
+{
+  "name": "AdPlacement",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "page_key": {
+      "type": "string"
+    },
+    "position": {
+      "type": "string",
+      "enum": [
+        "top",
+        "bottom",
+        "sidebar",
+        "inline"
+      ],
+      "default": "bottom"
+    },
+    "ad_type": {
+      "type": "string",
+      "enum": [
+        "banner",
+        "native",
+        "interstitial",
+        "rewarded",
+        "internal_promotion"
+      ],
+      "default": "banner"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_on_mobile": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_on_tablet": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_on_desktop": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_in_portrait": {
+      "type": "boolean",
+      "default": true
+    },
+    "show_in_landscape": {
+      "type": "boolean",
+      "default": true
+    },
+    "minimum_width": {
+      "type": "number",
+      "default": 0
+    },
+    "maximum_width": {
+      "type": "number",
+      "default": 0
+    },
+    "plan_rules_json": {
+      "type": "string"
+    },
+    "excluded_routes_json": {
+      "type": "string"
+    },
+    "order_index": {
+      "type": "number",
+      "default": 0
+    },
+    "active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "name",
+    "code"
+  ]
+}
