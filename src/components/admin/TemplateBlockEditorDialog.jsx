@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -52,25 +52,131 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortSiblings(rows) {
+  return [...rows].sort((left, right) => (
+    toNumber(left.order_index) - toNumber(right.order_index)
+    || String(left.id).localeCompare(String(right.id))
+  ));
+}
+
+function collectDescendants(blockId, blocks) {
+  const childrenByParent = new Map();
+
+  for (const block of blocks) {
+    const key = block.parent_id || null;
+
+    if (!childrenByParent.has(key)) {
+      childrenByParent.set(key, []);
+    }
+
+    childrenByParent.get(key).push(block);
+  }
+
+  const result = [];
+  const queue = [...(childrenByParent.get(blockId) || [])];
+  const visited = new Set();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (!current?.id || visited.has(current.id)) {
+      continue;
+    }
+
+    visited.add(current.id);
+    result.push(current);
+
+    queue.push(...(childrenByParent.get(current.id) || []));
+  }
+
+  return result;
+}
+
+function sortDeepestFirst(rows) {
+  return [...rows].sort((left, right) => (
+    toNumber(right.depth_level) - toNumber(left.depth_level)
+    || toNumber(right.order_index) - toNumber(left.order_index)
+  ));
+}
+
+function buildUniqueCopyTitle(title, siblings) {
+  const base = String(title || 'Bloco').trim() || 'Bloco';
+  const siblingTitles = new Set(
+    siblings.map((item) => String(item.title || '').trim().toLowerCase()),
+  );
+
+  let attempt = 1;
+  let candidate = `${base} (cópia)`;
+
+  while (siblingTitles.has(candidate.toLowerCase())) {
+    attempt += 1;
+    candidate = `${base} (cópia ${attempt})`;
+  }
+
+  return candidate;
+}
+
 function buildTree(blocks) {
-  const sorted = [...blocks].sort((a, b) => {
-    const depthDiff = toNumber(a.depth_level) - toNumber(b.depth_level);
-    if (depthDiff !== 0) return depthDiff;
-    return toNumber(a.order_index) - toNumber(b.order_index);
-  });
-
+  const safeBlocks = uniqueById(blocks);
+  const byId = new Map(safeBlocks.map((block) => [block.id, block]));
   const byParent = new Map();
-  sorted.forEach((block) => {
-    const key = block.parent_id || 'root';
-    if (!byParent.has(key)) byParent.set(key, []);
-    byParent.get(key).push(block);
-  });
 
-  const attach = (parentId = 'root') =>
-    (byParent.get(parentId) || []).map((block) => ({
+  for (const block of safeBlocks) {
+    const parentId = (
+      block.parent_id
+      && block.parent_id !== block.id
+      && byId.has(block.parent_id)
+    )
+      ? block.parent_id
+      : null;
+
+    if (!byParent.has(parentId)) {
+      byParent.set(parentId, []);
+    }
+
+    byParent.get(parentId).push({
       ...block,
-      children: attach(block.id),
-    }));
+      parent_id: parentId,
+    });
+  }
+
+  for (const siblings of byParent.values()) {
+    siblings.sort((left, right) => (
+      toNumber(left.order_index) - toNumber(right.order_index)
+      || String(left.id).localeCompare(String(right.id))
+    ));
+  }
+
+  const attach = (parentId = null, ancestry = new Set()) => {
+    return (byParent.get(parentId) || []).map((block) => {
+      if (ancestry.has(block.id)) {
+        return {
+          ...block,
+          children: [],
+        };
+      }
+
+      const nextAncestry = new Set(ancestry);
+      nextAncestry.add(block.id);
+
+      return {
+        ...block,
+        children: attach(block.id, nextAncestry),
+      };
+    });
+  };
 
   return attach();
 }
@@ -182,13 +288,20 @@ export default function TemplateBlockEditorDialog({
   const [form, setForm] = useState(EMPTY_FORM);
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [busyAction, setBusyAction] = useState('');
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const templateId = template?.id;
 
   useEffect(() => {
     if (templateId && allBlocks) {
-      setBlocks(allBlocks.filter((b) => b.template_id === templateId));
+      setBlocks(
+        uniqueById(allBlocks).filter(
+          (block) => block.template_id === templateId,
+        ),
+      );
     } else {
       setBlocks([]);
     }
@@ -226,152 +339,617 @@ export default function TemplateBlockEditorDialog({
   };
 
   const handleSave = async () => {
-    if (!form.title.trim()) {
-      toast({ title: 'Informe o título do bloco', variant: 'destructive' });
+    if (
+      !templateId
+      || saving
+      || saveLockRef.current
+    ) {
       return;
     }
 
+    if (!form.title.trim()) {
+      toast({
+        title: 'Informe o título do bloco',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const parent = form.parent_id
+      ? blocks.find((block) => block.id === form.parent_id)
+      : null;
+
+    if (form.parent_id && !parent) {
+      toast({
+        title: 'Bloco pai inválido',
+        description: 'Atualize a estrutura e tente novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    saveLockRef.current = true;
     setSaving(true);
+
     const payload = {
       template_id: templateId,
-      parent_id: form.parent_id || null,
+      parent_id: parent?.id || null,
       block_type_id: form.block_type_id || null,
       title: form.title.trim(),
-      summary: form.summary || '',
-      content: form.content || '',
-      presenter_notes: form.presenter_notes || '',
-      order_index: toNumber(form.order_index),
-      depth_level: toNumber(form.depth_level),
-      importance_level: toNumber(form.importance_level, 3),
-      estimated_duration_seconds: toNumber(form.estimated_duration_seconds, 60),
+      summary: String(form.summary || '').trim(),
+      content: String(form.content || '').trim(),
+      presenter_notes: String(form.presenter_notes || '').trim(),
+      order_index: Math.max(0, toNumber(form.order_index)),
+      depth_level: parent
+        ? toNumber(parent.depth_level) + 1
+        : 0,
+      importance_level: Math.min(
+        5,
+        Math.max(1, toNumber(form.importance_level, 3)),
+      ),
+      estimated_duration_seconds: Math.max(
+        0,
+        toNumber(form.estimated_duration_seconds, 60),
+      ),
       is_essential: Boolean(form.is_essential),
     };
 
     try {
       if (editingBlock?.id) {
-        const updated = await base44.entities.TemplateBlock.update(editingBlock.id, payload);
-        setBlocks((prev) => prev.map((b) => (b.id === editingBlock.id ? { ...b, ...updated, ...payload } : b)));
+        const updated = await base44.entities.TemplateBlock.update(
+          editingBlock.id,
+          payload,
+        );
+
+        setBlocks((current) => current.map((block) => (
+          block.id === editingBlock.id
+            ? {
+                ...block,
+                ...payload,
+                ...(updated || {}),
+              }
+            : block
+        )));
+
         toast({ title: 'Bloco atualizado' });
       } else {
-        const created = await base44.entities.TemplateBlock.create(payload);
-        setBlocks((prev) => [...prev, created]);
+        const created = await base44.entities.TemplateBlock.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error('O novo bloco não retornou um ID válido.');
+        }
+
+        setBlocks((current) => [
+          ...current,
+          created,
+        ]);
+
         toast({ title: 'Bloco criado' });
       }
+
       setFormOpen(false);
-      if (onBlocksChanged) onBlocksChanged();
+      setEditingBlock(null);
+
+      if (onBlocksChanged) {
+        await onBlocksChanged();
+      }
     } catch (error) {
       console.error('Erro ao salvar bloco:', error);
-      toast({ title: 'Não foi possível salvar', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível salvar',
+        description: error.message || 'Tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
+  const swapOrder = async (block, target) => {
+    if (
+      !block?.id
+      || !target?.id
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyAction(`move:${block.id}`);
+
+    const blockOrder = toNumber(block.order_index);
+    const targetOrder = toNumber(target.order_index);
+
+    try {
+      await base44.entities.TemplateBlock.update(
+        block.id,
+        { order_index: targetOrder },
+      );
+
+      try {
+        await base44.entities.TemplateBlock.update(
+          target.id,
+          { order_index: blockOrder },
+        );
+      } catch (targetError) {
+        try {
+          await base44.entities.TemplateBlock.update(
+            block.id,
+            { order_index: blockOrder },
+          );
+        } catch {
+          // A lista será recarregada pelo componente pai.
+        }
+
+        throw targetError;
+      }
+
+      setBlocks((current) => current.map((item) => {
+        if (item.id === block.id) {
+          return {
+            ...item,
+            order_index: targetOrder,
+          };
+        }
+
+        if (item.id === target.id) {
+          return {
+            ...item,
+            order_index: blockOrder,
+          };
+        }
+
+        return item;
+      }));
+
+      if (onBlocksChanged) {
+        await onBlocksChanged();
+      }
+    } catch (error) {
+      console.error('Erro ao mover bloco:', error);
+
+      toast({
+        title: 'Não foi possível mover o bloco',
+        variant: 'destructive',
+      });
+    } finally {
+      actionLockRef.current = false;
+      setBusyAction('');
+    }
+  };
+
   const handleMoveUp = async (block) => {
-    const sorted = blocks
-      .filter((b) => (b.parent_id || null) === (block.parent_id || null))
-      .sort((a, b) => toNumber(a.order_index) - toNumber(b.order_index));
-    const idx = sorted.findIndex((b) => b.id === block.id);
-    if (idx <= 0) return;
-    const prev = sorted[idx - 1];
-    await Promise.all([
-      base44.entities.TemplateBlock.update(block.id, { order_index: toNumber(prev.order_index) }),
-      base44.entities.TemplateBlock.update(prev.id, { order_index: toNumber(block.order_index) }),
-    ]);
-    setBlocks((prev) => prev.map((b) => {
-      if (b.id === block.id) return { ...b, order_index: toNumber(prev.order_index) };
-      if (b.id === prev.id) return { ...b, order_index: toNumber(block.order_index) };
-      return b;
-    }));
-    if (onBlocksChanged) onBlocksChanged();
+    const siblings = sortSiblings(
+      blocks.filter((item) => (
+        (item.parent_id || null)
+        === (block.parent_id || null)
+      )),
+    );
+
+    const index = siblings.findIndex(
+      (item) => item.id === block.id,
+    );
+
+    if (index <= 0) {
+      return;
+    }
+
+    await swapOrder(block, siblings[index - 1]);
   };
 
   const handleMoveDown = async (block) => {
-    const sorted = blocks
-      .filter((b) => (b.parent_id || null) === (block.parent_id || null))
-      .sort((a, b) => toNumber(a.order_index) - toNumber(b.order_index));
-    const idx = sorted.findIndex((b) => b.id === block.id);
-    if (idx >= sorted.length - 1) return;
-    const next = sorted[idx + 1];
-    await Promise.all([
-      base44.entities.TemplateBlock.update(block.id, { order_index: toNumber(next.order_index) }),
-      base44.entities.TemplateBlock.update(next.id, { order_index: toNumber(block.order_index) }),
-    ]);
-    setBlocks((prev) => prev.map((b) => {
-      if (b.id === block.id) return { ...b, order_index: toNumber(next.order_index) };
-      if (b.id === next.id) return { ...b, order_index: toNumber(block.order_index) };
-      return b;
-    }));
-    if (onBlocksChanged) onBlocksChanged();
+    const siblings = sortSiblings(
+      blocks.filter((item) => (
+        (item.parent_id || null)
+        === (block.parent_id || null)
+      )),
+    );
+
+    const index = siblings.findIndex(
+      (item) => item.id === block.id,
+    );
+
+    if (index < 0 || index >= siblings.length - 1) {
+      return;
+    }
+
+    await swapOrder(block, siblings[index + 1]);
+  };
+
+  const updateBlockDepthTree = async (
+    block,
+    {
+      newParentId,
+      depthDelta,
+    },
+  ) => {
+    if (
+      !block?.id
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    const descendants = collectDescendants(
+      block.id,
+      blocks,
+    );
+
+    actionLockRef.current = true;
+    setBusyAction(`level:${block.id}`);
+
+    try {
+      const rootDepth = Math.max(
+        0,
+        toNumber(block.depth_level) + depthDelta,
+      );
+
+      await base44.entities.TemplateBlock.update(
+        block.id,
+        {
+          parent_id: newParentId || null,
+          depth_level: rootDepth,
+        },
+      );
+
+      for (const descendant of descendants) {
+        await base44.entities.TemplateBlock.update(
+          descendant.id,
+          {
+            depth_level: Math.max(
+              0,
+              toNumber(descendant.depth_level) + depthDelta,
+            ),
+          },
+        );
+      }
+
+      const descendantIds = new Set(
+        descendants.map((item) => item.id),
+      );
+
+      setBlocks((current) => current.map((item) => {
+        if (item.id === block.id) {
+          return {
+            ...item,
+            parent_id: newParentId || null,
+            depth_level: rootDepth,
+          };
+        }
+
+        if (descendantIds.has(item.id)) {
+          return {
+            ...item,
+            depth_level: Math.max(
+              0,
+              toNumber(item.depth_level) + depthDelta,
+            ),
+          };
+        }
+
+        return item;
+      }));
+
+      if (onBlocksChanged) {
+        await onBlocksChanged();
+      }
+    } catch (error) {
+      console.error(
+        'Erro ao alterar o nível do bloco:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível alterar o nível',
+        description:
+          'Atualize a estrutura antes de tentar novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      actionLockRef.current = false;
+      setBusyAction('');
+    }
   };
 
   const handleIndent = async (block) => {
-    const sorted = blocks
-      .filter((b) => (b.parent_id || null) === (block.parent_id || null))
-      .sort((a, b) => toNumber(a.order_index) - toNumber(b.order_index));
-    const idx = sorted.findIndex((b) => b.id === block.id);
-    const prevBlock = idx > 0 ? sorted[idx - 1] : null;
-    if (!prevBlock) return;
-    await base44.entities.TemplateBlock.update(block.id, {
-      depth_level: toNumber(block.depth_level) + 1,
-      parent_id: prevBlock.id,
+    const siblings = sortSiblings(
+      blocks.filter((item) => (
+        (item.parent_id || null)
+        === (block.parent_id || null)
+      )),
+    );
+
+    const index = siblings.findIndex(
+      (item) => item.id === block.id,
+    );
+
+    const previousSibling = index > 0
+      ? siblings[index - 1]
+      : null;
+
+    if (!previousSibling) {
+      return;
+    }
+
+    const previousDescendantIds = new Set(
+      collectDescendants(block.id, blocks)
+        .map((item) => item.id),
+    );
+
+    if (
+      previousSibling.id === block.id
+      || previousDescendantIds.has(previousSibling.id)
+    ) {
+      toast({
+        title: 'Hierarquia inválida',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    await updateBlockDepthTree(block, {
+      newParentId: previousSibling.id,
+      depthDelta: 1,
     });
-    setBlocks((prev) => prev.map((b) => b.id === block.id ? { ...b, depth_level: toNumber(block.depth_level) + 1, parent_id: prevBlock.id } : b));
-    if (onBlocksChanged) onBlocksChanged();
   };
 
   const handleOutdent = async (block) => {
-    if (toNumber(block.depth_level) <= 0) return;
-    const parent = block.parent_id ? blocks.find((b) => b.id === block.parent_id) : null;
-    const newParentId = parent?.parent_id || null;
-    await base44.entities.TemplateBlock.update(block.id, {
-      depth_level: toNumber(block.depth_level) - 1,
-      parent_id: newParentId,
+    if (
+      toNumber(block.depth_level) <= 0
+      || !block.parent_id
+    ) {
+      return;
+    }
+
+    const parent = blocks.find(
+      (item) => item.id === block.parent_id,
+    );
+
+    if (!parent) {
+      toast({
+        title: 'Bloco pai não encontrado',
+        description: 'Atualize a estrutura.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    await updateBlockDepthTree(block, {
+      newParentId: parent.parent_id || null,
+      depthDelta: -1,
     });
-    setBlocks((prev) => prev.map((b) => b.id === block.id ? { ...b, depth_level: toNumber(block.depth_level) - 1, parent_id: newParentId } : b));
-    if (onBlocksChanged) onBlocksChanged();
   };
 
   const handleDuplicate = async (block) => {
+    if (
+      !block?.id
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyAction(`duplicate:${block.id}`);
+
+    const sourceTree = [
+      block,
+      ...collectDescendants(block.id, blocks),
+    ].sort((left, right) => (
+      toNumber(left.depth_level)
+      - toNumber(right.depth_level)
+      || toNumber(left.order_index)
+      - toNumber(right.order_index)
+    ));
+
+    const siblings = blocks.filter((item) => (
+      (item.parent_id || null)
+      === (block.parent_id || null)
+    ));
+
+    const idMap = new Map();
+    const createdBlocks = [];
+
     try {
-      const created = await base44.entities.TemplateBlock.create({
-        template_id: templateId,
-        parent_id: block.parent_id || null,
-        block_type_id: block.block_type_id || null,
-        title: `${block.title || 'Bloco'} (cópia)`,
-        summary: block.summary || '',
-        content: block.content || '',
-        presenter_notes: block.presenter_notes || '',
-        order_index: toNumber(block.order_index) + 0.5,
-        depth_level: toNumber(block.depth_level),
-        importance_level: toNumber(block.importance_level, 3),
-        estimated_duration_seconds: toNumber(block.estimated_duration_seconds, 60),
-        is_essential: Boolean(block.is_essential),
+      for (const sourceBlock of sourceTree) {
+        const isRoot = sourceBlock.id === block.id;
+
+        const created = await base44.entities.TemplateBlock.create({
+          template_id: templateId,
+          parent_id: isRoot
+            ? block.parent_id || null
+            : idMap.get(sourceBlock.parent_id) || null,
+          block_type_id: sourceBlock.block_type_id || null,
+          title: isRoot
+            ? buildUniqueCopyTitle(block.title, siblings)
+            : sourceBlock.title || '',
+          summary: sourceBlock.summary || '',
+          content: sourceBlock.content || '',
+          presenter_notes: sourceBlock.presenter_notes || '',
+          order_index: isRoot
+            ? toNumber(block.order_index) + 0.5
+            : toNumber(sourceBlock.order_index),
+          depth_level: toNumber(sourceBlock.depth_level),
+          importance_level: toNumber(
+            sourceBlock.importance_level,
+            3,
+          ),
+          estimated_duration_seconds: toNumber(
+            sourceBlock.estimated_duration_seconds,
+            60,
+          ),
+          is_essential: Boolean(sourceBlock.is_essential),
+        });
+
+        if (!created?.id) {
+          throw new Error(
+            'A duplicação não retornou um ID válido.',
+          );
+        }
+
+        idMap.set(sourceBlock.id, created.id);
+        createdBlocks.push(created);
+      }
+
+      setBlocks((current) => [
+        ...current,
+        ...createdBlocks,
+      ]);
+
+      toast({
+        title: sourceTree.length > 1
+          ? 'Bloco e subtópicos duplicados'
+          : 'Bloco duplicado',
       });
-      setBlocks((prev) => [...prev, created].sort((a, b) => toNumber(a.order_index) - toNumber(b.order_index)));
-      toast({ title: 'Bloco duplicado' });
-      if (onBlocksChanged) onBlocksChanged();
+
+      if (onBlocksChanged) {
+        await onBlocksChanged();
+      }
     } catch (error) {
-      toast({ title: 'Não foi possível duplicar', variant: 'destructive' });
+      console.error('Erro ao duplicar bloco:', error);
+
+      for (const created of sortDeepestFirst(createdBlocks)) {
+        try {
+          await base44.entities.TemplateBlock.delete(
+            created.id,
+          );
+        } catch {
+          // A lista será recarregada pelo componente pai.
+        }
+      }
+
+      toast({
+        title: 'Não foi possível duplicar',
+        description:
+          'A cópia incompleta foi removida.',
+        variant: 'destructive',
+      });
+    } finally {
+      actionLockRef.current = false;
+      setBusyAction('');
     }
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    const target = deleteTarget;
+
+    if (
+      !target?.id
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyAction(`delete:${target.id}`);
+
+    const directChildren = sortSiblings(
+      blocks.filter(
+        (item) => item.parent_id === target.id,
+      ),
+    );
+
+    const descendants = collectDescendants(
+      target.id,
+      blocks,
+    );
+
     try {
-      const children = blocks.filter((b) => b.parent_id === deleteTarget.id);
-      for (const child of children) {
-        await base44.entities.TemplateBlock.update(child.id, { parent_id: deleteTarget.parent_id || null, depth_level: Math.max(0, toNumber(child.depth_level) - 1) });
+      const depthDelta = -1;
+
+      for (const child of directChildren) {
+        await base44.entities.TemplateBlock.update(
+          child.id,
+          {
+            parent_id: target.parent_id || null,
+            depth_level: Math.max(
+              0,
+              toNumber(child.depth_level) + depthDelta,
+            ),
+          },
+        );
       }
-      await base44.entities.TemplateBlock.delete(deleteTarget.id);
-      setBlocks((prev) => prev
-        .filter((b) => b.id !== deleteTarget.id)
-        .map((b) => b.parent_id === deleteTarget.id ? { ...b, parent_id: deleteTarget.parent_id || null, depth_level: Math.max(0, toNumber(b.depth_level) - 1) } : b));
-      setDeleteTarget(null);
+
+      const directChildIds = new Set(
+        directChildren.map((item) => item.id),
+      );
+
+      for (const descendant of descendants) {
+        if (directChildIds.has(descendant.id)) {
+          continue;
+        }
+
+        await base44.entities.TemplateBlock.update(
+          descendant.id,
+          {
+            depth_level: Math.max(
+              0,
+              toNumber(descendant.depth_level) + depthDelta,
+            ),
+          },
+        );
+      }
+
+      await base44.entities.TemplateBlock.delete(
+        target.id,
+      );
+
+      const descendantIds = new Set(
+        descendants.map((item) => item.id),
+      );
+
+      setBlocks((current) => current
+        .filter((item) => item.id !== target.id)
+        .map((item) => {
+          if (directChildIds.has(item.id)) {
+            return {
+              ...item,
+              parent_id: target.parent_id || null,
+              depth_level: Math.max(
+                0,
+                toNumber(item.depth_level) - 1,
+              ),
+            };
+          }
+
+          if (descendantIds.has(item.id)) {
+            return {
+              ...item,
+              depth_level: Math.max(
+                0,
+                toNumber(item.depth_level) - 1,
+              ),
+            };
+          }
+
+          return item;
+        }));
+
       toast({ title: 'Bloco excluído' });
-      if (onBlocksChanged) onBlocksChanged();
+
+      if (onBlocksChanged) {
+        await onBlocksChanged();
+      }
     } catch (error) {
-      toast({ title: 'Não foi possível excluir', variant: 'destructive' });
+      console.error('Erro ao excluir bloco:', error);
+
+      toast({
+        title: 'Não foi possível excluir',
+        description:
+          'A estrutura será atualizada para refletir o estado real.',
+        variant: 'destructive',
+      });
+
+      if (onBlocksChanged) {
+        await onBlocksChanged();
+      }
+    } finally {
+      actionLockRef.current = false;
+      setBusyAction('');
+      setDeleteTarget(null);
     }
   };
 
@@ -394,7 +972,11 @@ export default function TemplateBlockEditorDialog({
               <p className="text-sm text-muted-foreground">
                 {blocks.length} bloco(s) neste modelo.
               </p>
-              <Button size="sm" onClick={() => openCreate(null)}>
+              <Button
+                size="sm"
+                onClick={() => openCreate(null)}
+                disabled={Boolean(busyAction) || saving}
+              >
                 <Plus className="mr-1.5 h-4 w-4" />
                 Adicionar bloco
               </Button>
@@ -405,7 +987,11 @@ export default function TemplateBlockEditorDialog({
                 Este modelo ainda não possui blocos. Clique em &ldquo;Adicionar bloco&rdquo; para começar.
               </div>
             ) : (
-              <div className="space-y-2">
+              <div
+                className={`space-y-2 ${
+                  busyAction ? 'pointer-events-none opacity-70' : ''
+                }`}
+              >
                 {tree.map((node) => (
                   <TemplateBlockRow
                     key={node.id}
@@ -425,7 +1011,13 @@ export default function TemplateBlockEditorDialog({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => onOpenChange(false)}>Fechar</Button>
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={Boolean(busyAction) || saving}
+            >
+              Fechar
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -528,7 +1120,13 @@ export default function TemplateBlockEditorDialog({
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setFormOpen(false)} disabled={saving}>Cancelar</Button>
+            <Button
+              variant="outline"
+              onClick={() => setFormOpen(false)}
+              disabled={saving}
+            >
+              Cancelar
+            </Button>
             <Button onClick={handleSave} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editingBlock ? 'Salvar' : 'Criar bloco'}
