@@ -89,6 +89,15 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function uniqueById(rows) {
+  const seen = new Set();
+  return (Array.isArray(rows) ? rows : []).filter((row) => {
+    if (!row?.id || seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
+  });
+}
+
 function formatTime(totalSeconds) {
   const safeSeconds = Math.max(0, Math.floor(asNumber(totalSeconds)));
   const hours = Math.floor(safeSeconds / 3600);
@@ -250,6 +259,7 @@ export default function PresentMode() {
   const progressRef = useRef(new Map());
   const blockStartedAtRef = useRef(Date.now());
   const loadingRef = useRef(false);
+  const operationRef = useRef(false);
 
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
@@ -438,38 +448,50 @@ export default function PresentMode() {
 
     const firstBlock = orderedBlocks[0];
     const now = new Date().toISOString();
+    let createdSession = null;
 
-    const createdSession = await base44.entities.PresentationSession.create({
-      presentation_id: id,
-      user_id: user.id,
-      session_type: 'presentation',
-      status: 'active',
-      started_at: now,
-      paused_at: '',
-      finished_at: '',
-      elapsed_seconds: 0,
-      planned_duration_seconds: orderedBlocks.reduce(
-        (total, block) => total + block.estimated_duration_seconds,
-        0,
-      ),
-      current_block_id: firstBlock.id,
-      completed_count: 0,
-      skipped_count: 0,
-      notes: '',
-    });
+    try {
+      createdSession = await base44.entities.PresentationSession.create({
+        presentation_id: id,
+        user_id: user.id,
+        session_type: 'presentation',
+        status: 'active',
+        started_at: now,
+        paused_at: '',
+        finished_at: '',
+        elapsed_seconds: 0,
+        planned_duration_seconds: orderedBlocks.reduce(
+          (total, block) => total + block.estimated_duration_seconds,
+          0,
+        ),
+        current_block_id: firstBlock.id,
+        completed_count: 0,
+        skipped_count: 0,
+        notes: '',
+      });
 
-    const createdProgress = await createProgressRows(
-      createdSession,
-      orderedBlocks,
-      firstBlock.id,
-    );
+      const createdProgress = await createProgressRows(
+        createdSession,
+        orderedBlocks,
+        firstBlock.id,
+      );
 
-    return {
-      session: createdSession,
-      progress: createdProgress,
-      index: 0,
-      elapsed: 0,
-    };
+      return {
+        session: createdSession,
+        progress: createdProgress,
+        index: 0,
+        elapsed: 0,
+      };
+    } catch (sessionError) {
+      if (createdSession?.id) {
+        try {
+          await base44.entities.PresentationSession.delete(createdSession.id);
+        } catch (cleanupError) {
+          console.warn('Não foi possível remover a sessão incompleta:', cleanupError);
+        }
+      }
+      throw sessionError;
+    }
   }, [createProgressRows, id, user?.id]);
 
   const applySessionState = useCallback((state) => {
@@ -507,15 +529,21 @@ export default function PresentMode() {
         ),
       ]);
 
-      const ordered = sortBlocks(Array.isArray(blockRows) ? blockRows : [])
-        .filter((block) => !block.is_hidden && block.show_to_audience);
+      if (!presentationRow || presentationRow.user_id !== user.id) {
+        setPresentation(null);
+        setBlocks([]);
+        setError('Esta apresentação não existe ou você não possui acesso a ela.');
+        return;
+      }
+
+      const ordered = sortBlocks(
+        uniqueById(blockRows).filter((block) => block.presentation_id === id),
+      ).filter((block) => !block.is_hidden && block.show_to_audience);
 
       setPresentation(presentationRow);
       setBlocks(ordered);
 
-      const preference = Array.isArray(preferenceRows)
-        ? preferenceRows[0]
-        : null;
+      const preference = uniqueById(preferenceRows)[0] || null;
 
       if (preference) {
         setFontSize(clamp(
@@ -553,14 +581,35 @@ export default function PresentMode() {
         return;
       }
 
-      const activeSession = (Array.isArray(sessionRows) ? sessionRows : [])
+      const activeSession = uniqueById(sessionRows)
         .find((row) => row.status === 'active' || row.status === 'paused');
 
       if (activeSession) {
-        const savedProgress = await base44.entities.SessionBlockProgress.filter(
-          { session_id: activeSession.id },
-          'order_used',
+        const savedProgressRows = uniqueById(
+          await base44.entities.SessionBlockProgress.filter(
+            { session_id: activeSession.id },
+            'order_used',
+          ),
         );
+        const validBlockIds = new Set(ordered.map((block) => block.id));
+        const savedProgress = savedProgressRows.filter((row) => validBlockIds.has(row.block_id));
+        const existingBlockIds = new Set(savedProgress.map((row) => row.block_id));
+        const missingBlocks = ordered.filter((block) => !existingBlockIds.has(block.id));
+
+        for (const block of missingBlocks) {
+          const createdRow = await base44.entities.SessionBlockProgress.create({
+            session_id: activeSession.id,
+            block_id: block.id,
+            status: 'pending',
+            started_at: '',
+            completed_at: '',
+            elapsed_seconds: 0,
+            visit_count: 0,
+            order_used: ordered.findIndex((item) => item.id === block.id),
+            note: '',
+          });
+          savedProgress.push(createdRow);
+        }
 
         const currentId = activeSession.current_block_id
           || savedProgress.find((row) => row.status === 'current')?.block_id;
@@ -688,6 +737,8 @@ export default function PresentMode() {
     targetIndex,
     { markPrevious = false, previousStatus = 'completed' } = {},
   ) => {
+    if (operationRef.current) return;
+
     if (
       targetIndex < 0
       || targetIndex >= visibleBlocks.length
@@ -696,7 +747,9 @@ export default function PresentMode() {
       return;
     }
 
-    const oldIndex = currentIndexRef.current;
+    operationRef.current = true;
+    try {
+      const oldIndex = currentIndexRef.current;
     const oldBlock = visibleBlocks[oldIndex];
     const newBlock = visibleBlocks[targetIndex];
     const now = new Date().toISOString();
@@ -744,8 +797,11 @@ export default function PresentMode() {
       });
     }
 
-    setRunning(true);
-    resetControlsTimer();
+      setRunning(true);
+      resetControlsTimer();
+    } finally {
+      operationRef.current = false;
+    }
   }, [resetControlsTimer, updateProgressStatus, visibleBlocks]);
 
   const goNext = useCallback(async () => {
@@ -782,6 +838,8 @@ export default function PresentMode() {
   }, [activateIndex, currentBlock, updateProgressStatus, visibleBlocks.length]);
 
   const togglePause = useCallback(async () => {
+    if (operationRef.current) return;
+    operationRef.current = true;
     const nextRunning = !running;
     setRunning(nextRunning);
 
@@ -794,6 +852,7 @@ export default function PresentMode() {
     }
 
     resetControlsTimer();
+    operationRef.current = false;
   }, [resetControlsTimer, running]);
 
   const handleContinueSession = useCallback(() => {
@@ -803,7 +862,9 @@ export default function PresentMode() {
   }, [applySessionState, pendingSession]);
 
   const handleRestartSession = useCallback(async () => {
-    if (visibleBlocks.length === 0) return;
+    if (visibleBlocks.length === 0 || operationRef.current) return;
+    operationRef.current = true;
+    operationRef.current = true;
     setSaving(true);
 
     try {
@@ -849,6 +910,7 @@ export default function PresentMode() {
         variant: 'destructive',
       });
     } finally {
+      operationRef.current = false;
       setSaving(false);
     }
   }, [createNewSession, pendingSession, toast, visibleBlocks]);
@@ -863,6 +925,7 @@ export default function PresentMode() {
   }, [confirmBeforeRestart, handleRestartSession]);
 
   const handleEndPresentation = useCallback(async () => {
+    if (operationRef.current) return;
     if (!sessionRef.current?.id) {
       navigate(`/session-history/${id}`);
       return;
@@ -908,6 +971,7 @@ export default function PresentMode() {
         variant: 'destructive',
       });
     } finally {
+      operationRef.current = false;
       setSaving(false);
     }
   }, [endNotes, id, navigate, persistSession, toast, updateProgressStatus, visibleBlocks]);
