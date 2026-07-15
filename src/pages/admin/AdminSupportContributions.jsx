@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -59,6 +59,14 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value) || 0);
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) map.set(row.id, row);
+  }
+  return [...map.values()];
+}
+
 function LoadingState() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
@@ -97,6 +105,7 @@ export default function AdminSupportContributions() {
   const [analyzing, setAnalyzing] = useState(null);
   const [actionForm, setActionForm] = useState({ action: 'confirm', admin_notes: '', rejection_reason: '' });
   const [saving, setSaving] = useState(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!isAdmin) {
@@ -108,7 +117,7 @@ export default function AdminSupportContributions() {
 
     try {
       const rows = await base44.entities.SupportContribution.filter({}, '-created_date', 500);
-      setContributions(Array.isArray(rows) ? rows : []);
+      setContributions(uniqueById(rows));
     } catch {
       toast({ title: 'Falha ao carregar', variant: 'destructive' });
     } finally {
@@ -142,18 +151,45 @@ export default function AdminSupportContributions() {
   }, [contributions]);
 
   const openAnalyze = (contrib, action) => {
-    setAnalyzing(contrib);
-    setActionForm({ action, admin_notes: '', rejection_reason: '' });
-  };
+    if (!contrib?.id || saving || actionLockRef.current) return;
 
-  const handleAction = async () => {
-    if (!analyzing?.id || saving) return;
-
-    if (actionForm.action === 'reject' && !actionForm.rejection_reason.trim()) {
-      toast({ title: 'Informe o motivo', variant: 'destructive' });
+    if (!['pending', 'under_review'].includes(contrib.status)) {
+      toast({
+        title: 'Apoio já processado',
+        description: 'Atualize a página para conferir o status mais recente.',
+        variant: 'destructive',
+      });
       return;
     }
 
+    setAnalyzing(contrib);
+    setActionForm({
+      action,
+      admin_notes: action === 'confirm' ? (contrib.admin_notes || '') : '',
+      rejection_reason: action === 'reject' ? (contrib.rejection_reason || contrib.admin_notes || '') : '',
+    });
+  };
+
+  const handleAction = async () => {
+    if (!analyzing?.id || saving || actionLockRef.current) return;
+
+    const currentContribution = contributions.find((item) => item.id === analyzing.id);
+    if (!currentContribution || !['pending', 'under_review'].includes(currentContribution.status)) {
+      toast({
+        title: 'Apoio já processado',
+        description: 'Atualize a página antes de tentar novamente.',
+        variant: 'destructive',
+      });
+      setAnalyzing(null);
+      return;
+    }
+
+    if (actionForm.action === 'reject' && !actionForm.rejection_reason.trim()) {
+      toast({ title: 'Informe o motivo da rejeição', variant: 'destructive' });
+      return;
+    }
+
+    actionLockRef.current = true;
     setSaving(true);
 
     try {
@@ -165,23 +201,34 @@ export default function AdminSupportContributions() {
           analyzed_at: now,
           analyzed_by_user_id: user?.id || '',
           admin_notes: actionForm.admin_notes.trim(),
+          rejection_reason: '',
         });
+
         toast({ title: 'Apoio confirmado' });
       } else if (actionForm.action === 'reject') {
         await base44.entities.SupportContribution.update(analyzing.id, {
           status: 'rejected',
           analyzed_at: now,
           analyzed_by_user_id: user?.id || '',
-          admin_notes: actionForm.rejection_reason.trim(),
+          admin_notes: actionForm.admin_notes.trim(),
+          rejection_reason: actionForm.rejection_reason.trim(),
         });
+
         toast({ title: 'Apoio rejeitado' });
       }
 
       setAnalyzing(null);
-      loadData({ silent: true });
-    } catch {
-      toast({ title: 'Não foi possível processar', variant: 'destructive' });
+      await loadData({ silent: true });
+    } catch (error) {
+      console.error('Erro ao processar apoio:', error);
+      toast({
+        title: 'Não foi possível processar',
+        description: 'Atualize a lista antes de tentar novamente.',
+        variant: 'destructive',
+      });
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setSaving(false);
     }
   };
@@ -316,15 +363,48 @@ export default function AdminSupportContributions() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-2">
-            <Label>{actionForm.action === 'confirm' ? 'Observação administrativa' : 'Motivo da rejeição'}</Label>
-            <Textarea
-              value={actionForm.admin_notes}
-              onChange={(e) => setActionForm((f) => ({ ...f, admin_notes: e.target.value }))}
-              rows={3}
-              placeholder={actionForm.action === 'confirm' ? 'Observação interna...' : 'Explique o motivo...'}
-            />
-          </div>
+          {actionForm.action === 'confirm' ? (
+            <div className="space-y-2">
+              <Label>Observação administrativa</Label>
+              <Textarea
+                value={actionForm.admin_notes}
+                onChange={(e) => setActionForm((current) => ({
+                  ...current,
+                  admin_notes: e.target.value,
+                }))}
+                rows={3}
+                placeholder="Observação interna opcional..."
+              />
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Motivo da rejeição</Label>
+                <Textarea
+                  value={actionForm.rejection_reason}
+                  onChange={(e) => setActionForm((current) => ({
+                    ...current,
+                    rejection_reason: e.target.value,
+                  }))}
+                  rows={3}
+                  placeholder="Explique o motivo da rejeição..."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Observação administrativa (opcional)</Label>
+                <Textarea
+                  value={actionForm.admin_notes}
+                  onChange={(e) => setActionForm((current) => ({
+                    ...current,
+                    admin_notes: e.target.value,
+                  }))}
+                  rows={2}
+                  placeholder="Anotação interna..."
+                />
+              </div>
+            </div>
+          )}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="outline" onClick={() => setAnalyzing(null)} disabled={saving}>Cancelar</Button>
