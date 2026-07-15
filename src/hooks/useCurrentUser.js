@@ -26,18 +26,26 @@ function getRecordTimestamp(record) {
 
   const timestamp = new Date(value).getTime();
 
-  return Number.isFinite(timestamp) ? timestamp : 0;
+  return Number.isFinite(timestamp)
+    ? timestamp
+    : 0;
 }
 
 function selectCanonicalProfile(rows, userId) {
-  if (!Array.isArray(rows) || rows.length === 0) {
+  if (
+    !Array.isArray(rows)
+    || rows.length === 0
+  ) {
     return null;
   }
 
   const validProfiles = rows.filter(
     (profile) => (
       profile?.id
-      && (!userId || profile.user_id === userId)
+      && (
+        !userId
+        || profile.user_id === userId
+      )
     ),
   );
 
@@ -45,36 +53,44 @@ function selectCanonicalProfile(rows, userId) {
     return null;
   }
 
-  return [...validProfiles].sort((left, right) => {
-    const activeDifference = (
-      Number(right.active !== false)
-      - Number(left.active !== false)
-    );
+  return [...validProfiles].sort(
+    (left, right) => {
+      const activeDifference = (
+        Number(right.active !== false)
+        - Number(left.active !== false)
+      );
 
-    if (activeDifference !== 0) {
-      return activeDifference;
-    }
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
 
-    const onboardingDifference = (
-      Number(right.onboarding_completed === true)
-      - Number(left.onboarding_completed === true)
-    );
+      const onboardingDifference = (
+        Number(
+          right.onboarding_completed === true,
+        )
+        - Number(
+          left.onboarding_completed === true,
+        )
+      );
 
-    if (onboardingDifference !== 0) {
-      return onboardingDifference;
-    }
+      if (onboardingDifference !== 0) {
+        return onboardingDifference;
+      }
 
-    const updatedDifference = (
-      getRecordTimestamp(right)
-      - getRecordTimestamp(left)
-    );
+      const updatedDifference = (
+        getRecordTimestamp(right)
+        - getRecordTimestamp(left)
+      );
 
-    if (updatedDifference !== 0) {
-      return updatedDifference;
-    }
+      if (updatedDifference !== 0) {
+        return updatedDifference;
+      }
 
-    return String(right.id).localeCompare(String(left.id));
-  })[0];
+      return String(right.id).localeCompare(
+        String(left.id),
+      );
+    },
+  )[0];
 }
 
 function createReadableError(error) {
@@ -117,21 +133,15 @@ export default function useCurrentUser() {
     authChecked,
     checkUserAuth,
     checkAppState,
+    refreshAuth,
     logout,
     navigateToLogin,
   } = useAuth();
 
   /*
   |--------------------------------------------------------------------------
-  | Perfil do usuário
+  | Perfil compartilhado do usuário
   |--------------------------------------------------------------------------
-  |
-  | O AuthContext já consulta base44.auth.me().
-  | Portanto, este hook não deve consultar a autenticação novamente.
-  |
-  | O React Query mantém uma única consulta compartilhada entre todas
-  | as páginas que utilizam useCurrentUser.
-  |
   */
 
   const profileQuery = useQuery({
@@ -149,7 +159,10 @@ export default function useCurrentUser() {
         user_id: user.id,
       });
 
-      return selectCanonicalProfile(rows, user.id);
+      return selectCanonicalProfile(
+        rows,
+        user.id,
+      );
     },
 
     enabled: Boolean(
@@ -168,12 +181,8 @@ export default function useCurrentUser() {
 
   /*
   |--------------------------------------------------------------------------
-  | Estado de carregamento
+  | Carregamento
   |--------------------------------------------------------------------------
-  |
-  | Enquanto o aplicativo verifica configurações públicas, autenticação
-  | ou perfil, as páginas devem permanecer em estado de carregamento.
-  |
   */
 
   const loading = Boolean(
@@ -189,15 +198,13 @@ export default function useCurrentUser() {
   |--------------------------------------------------------------------------
   | Erros
   |--------------------------------------------------------------------------
-  |
-  | O erro auth_required representa apenas que o usuário não está logado.
-  | Isso não deve ser tratado como uma falha técnica pelo ProtectedRoute.
-  |
   */
 
   const error = useMemo(() => {
     if (profileQuery.error) {
-      return createReadableError(profileQuery.error);
+      return createReadableError(
+        profileQuery.error,
+      );
     }
 
     if (
@@ -218,15 +225,15 @@ export default function useCurrentUser() {
   |--------------------------------------------------------------------------
   | Permissões
   |--------------------------------------------------------------------------
-  |
-  | O UserProfile é a fonte principal da função administrativa.
-  | O papel existente no usuário autenticado fica apenas como fallback
-  | para compatibilidade com contas antigas.
-  |
   */
 
-  const profileRole = normalizeRole(profile?.role);
-  const userRole = normalizeRole(user?.role);
+  const profileRole = normalizeRole(
+    profile?.role,
+  );
+
+  const userRole = normalizeRole(
+    user?.role,
+  );
 
   const accountActive = (
     profile?.active !== false
@@ -247,10 +254,6 @@ export default function useCurrentUser() {
   |--------------------------------------------------------------------------
   | Atualização do perfil
   |--------------------------------------------------------------------------
-  |
-  | Use refreshProfile depois de atualizar o UserProfile para que todas
-  | as páginas recebam os novos dados imediatamente.
-  |
   */
 
   const refreshProfile = async () => {
@@ -292,17 +295,12 @@ export default function useCurrentUser() {
 
   /*
   |--------------------------------------------------------------------------
-  | Atualização completa da conta
+  | Atualização completa da autenticação e perfil
   |--------------------------------------------------------------------------
-  |
-  | Revalida autenticação e, em seguida, recarrega o perfil.
-  |
   */
 
   const refreshCurrentUser = async () => {
-    const refreshedUser = await checkUserAuth({
-      force: true,
-    });
+    const refreshedUser = await refreshAuth();
 
     if (!refreshedUser?.id) {
       queryClient.removeQueries({
@@ -332,6 +330,22 @@ export default function useCurrentUser() {
     return nextProfile;
   };
 
+  /*
+  |--------------------------------------------------------------------------
+  | Limpeza do cache ao sair
+  |--------------------------------------------------------------------------
+  */
+
+  const handleLogout = async (...args) => {
+    try {
+      return await logout(...args);
+    } finally {
+      queryClient.removeQueries({
+        queryKey: [PROFILE_QUERY_KEY],
+      });
+    }
+  };
+
   return {
     user,
     profile,
@@ -356,7 +370,11 @@ export default function useCurrentUser() {
 
     checkUserAuth,
     checkAppState,
-    logout,
+
+    // Necessário em Login.jsx e Register.jsx.
+    refreshAuth,
+
+    logout: handleLogout,
     navigateToLogin,
   };
 }
