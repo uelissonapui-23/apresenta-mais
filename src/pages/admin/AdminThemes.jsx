@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   Copy,
@@ -122,6 +122,48 @@ function getContrastColor(hex) {
   return luminance > 0.58 ? '#111827' : '#FFFFFF';
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortThemesByName(rows) {
+  return uniqueById(rows).sort((left, right) => (
+    String(left?.name || '').localeCompare(
+      String(right?.name || ''),
+      'pt-BR',
+      { sensitivity: 'base' },
+    )
+  ));
+}
+
+function buildUniqueCopyName(baseName, themes) {
+  const base = String(baseName || 'Tema').trim() || 'Tema';
+
+  const names = new Set(
+    uniqueById(themes).map((theme) => (
+      String(theme.name || '').trim().toLowerCase()
+    )),
+  );
+
+  let attempt = 1;
+  let candidate = `${base} — Cópia`;
+
+  while (names.has(candidate.toLowerCase())) {
+    attempt += 1;
+    candidate = `${base} — Cópia ${attempt}`;
+  }
+
+  return candidate;
+}
+
 function ThemePreview({ theme, compact = false }) {
   const background = normalizeHex(theme.background_color, '#FFFFFF');
   const title = normalizeHex(theme.title_color, '#111111');
@@ -239,6 +281,9 @@ export default function AdminThemes() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
+  const [busyThemeId, setBusyThemeId] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -264,9 +309,9 @@ export default function AdminThemes() {
         base44.entities.UserPreference.filter({}, '-updated_date'),
       ]);
 
-      setThemes(Array.isArray(themeRows) ? themeRows : []);
-      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
-      setPreferences(Array.isArray(preferenceRows) ? preferenceRows : []);
+      setThemes(sortThemesByName(themeRows));
+      setPresentations(uniqueById(presentationRows));
+      setPreferences(uniqueById(preferenceRows));
     } catch (error) {
       console.error('Erro ao carregar temas:', error);
       toast({
@@ -405,8 +450,15 @@ export default function AdminThemes() {
   };
 
   const handleSave = async () => {
-    if (!validateForm() || saving) return;
+    if (
+      !validateForm()
+      || saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
 
+    saveLockRef.current = true;
     setSaving(true);
     const payload = {
       name: form.name.trim(),
@@ -429,15 +481,48 @@ export default function AdminThemes() {
 
     try {
       if (editingTheme?.id) {
-        const updated = await base44.entities.PresentationTheme.update(editingTheme.id, payload);
-        setThemes((current) => current.map((theme) => (
-          theme.id === editingTheme.id ? { ...theme, ...payload, ...updated } : theme
-        )));
-        toast({ title: 'Tema atualizado', description: 'As alterações já estão disponíveis.' });
+        const updated = await base44.entities.PresentationTheme.update(
+          editingTheme.id,
+          payload,
+        );
+
+        setThemes((current) => sortThemesByName(
+          current.map((theme) => (
+            theme.id === editingTheme.id
+              ? {
+                  ...theme,
+                  ...payload,
+                  ...(updated || {}),
+                }
+              : theme
+          )),
+        ));
+
+        toast({
+          title: 'Tema atualizado',
+          description: 'As alterações já estão disponíveis.',
+        });
       } else {
-        const created = await base44.entities.PresentationTheme.create(payload);
-        setThemes((current) => [...current, created].sort((a, b) => String(a.name).localeCompare(String(b.name))));
-        toast({ title: 'Tema criado', description: 'O novo tema já pode ser usado nas apresentações.' });
+        const created = await base44.entities.PresentationTheme.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'O novo tema não retornou um ID válido.',
+          );
+        }
+
+        setThemes((current) => sortThemesByName([
+          ...current,
+          created,
+        ]));
+
+        toast({
+          title: 'Tema criado',
+          description:
+            'O novo tema já pode ser usado nas apresentações.',
+        });
       }
 
       setEditorOpen(false);
@@ -449,100 +534,226 @@ export default function AdminThemes() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleDuplicate = async (theme) => {
-    if (saving) return;
-    setSaving(true);
-    try {
-      const existingNames = new Set(themes.map((item) => String(item.name || '').toLowerCase()));
-      let copyName = `${theme.name} — Cópia`;
-      let index = 2;
-      while (existingNames.has(copyName.toLowerCase())) {
-        copyName = `${theme.name} — Cópia ${index}`;
-        index += 1;
-      }
+    if (
+      !theme?.id
+      || saving
+      || actionLockRef.current
+    ) {
+      return;
+    }
 
+    actionLockRef.current = true;
+    setBusyThemeId(theme.id);
+    setSaving(true);
+
+    try {
       const created = await base44.entities.PresentationTheme.create({
-        name: copyName,
+        name: buildUniqueCopyName(theme.name, themes),
         description: theme.description || '',
         thumbnail_url: theme.thumbnail_url || '',
-        background_color: theme.background_color || '#FFFFFF',
-        text_color: theme.text_color || '#1A1A1A',
-        title_color: theme.title_color || '#111111',
-        accent_color: theme.accent_color || '#3B82F6',
+        background_color: normalizeHex(
+          theme.background_color,
+          '#FFFFFF',
+        ),
+        text_color: normalizeHex(
+          theme.text_color,
+          '#1A1A1A',
+        ),
+        title_color: normalizeHex(
+          theme.title_color,
+          '#111111',
+        ),
+        accent_color: normalizeHex(
+          theme.accent_color,
+          '#3B82F6',
+        ),
         title_font: theme.title_font || 'Inter',
         body_font: theme.body_font || 'Inter',
-        default_title_size: Number(theme.default_title_size) || 40,
-        default_body_size: Number(theme.default_body_size) || 24,
-        default_alignment: theme.default_alignment || 'left',
-        transition_type: theme.transition_type || 'fade',
+        default_title_size:
+          Number(theme.default_title_size) || 40,
+        default_body_size:
+          Number(theme.default_body_size) || 24,
+        default_alignment:
+          theme.default_alignment || 'left',
+        transition_type:
+          theme.transition_type || 'fade',
         is_official: false,
         is_premium: false,
         active: false,
       });
 
-      setThemes((current) => [...current, created].sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      if (!created?.id) {
+        throw new Error(
+          'A cópia do tema não retornou um ID válido.',
+        );
+      }
+
+      setThemes((current) => sortThemesByName([
+        ...current,
+        created,
+      ]));
+
       toast({
         title: 'Tema duplicado',
-        description: 'A cópia foi criada inativa para você revisar antes de publicar.',
+        description:
+          'A cópia foi criada inativa para você revisar antes de publicar.',
       });
     } catch (error) {
       console.error('Erro ao duplicar tema:', error);
-      toast({ title: 'Não foi possível duplicar', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível duplicar',
+        description:
+          error.message
+          || 'Tente novamente em alguns instantes.',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
+      setBusyThemeId('');
       setSaving(false);
     }
   };
 
   const toggleActive = async (theme) => {
-    if (saving) return;
+    if (
+      !theme?.id
+      || saving
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyThemeId(theme.id);
     setSaving(true);
+
     const nextValue = theme.active === false;
+
     try {
-      await base44.entities.PresentationTheme.update(theme.id, { active: nextValue });
+      const updated = await base44.entities.PresentationTheme.update(
+        theme.id,
+        {
+          active: nextValue,
+        },
+      );
+
       setThemes((current) => current.map((item) => (
-        item.id === theme.id ? { ...item, active: nextValue } : item
+        item.id === theme.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active: nextValue,
+            }
+          : item
       )));
+
       toast({
-        title: nextValue ? 'Tema ativado' : 'Tema desativado',
+        title: nextValue
+          ? 'Tema ativado'
+          : 'Tema desativado',
         description: nextValue
           ? 'Ele voltou a aparecer para os usuários.'
           : 'Apresentações antigas continuam preservando o tema.',
       });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
-      toast({ title: 'Não foi possível alterar o status', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível alterar o status',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
+      setBusyThemeId('');
       setSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget || saving) return;
-    const usage = usageMap[deleteTarget.id] || { presentations: 0, preferences: 0 };
-    if (usage.presentations > 0 || usage.preferences > 0) {
-      toast({
-        title: 'Tema em uso',
-        description: 'Desative o tema em vez de excluí-lo, ou remova primeiro seus vínculos.',
-        variant: 'destructive',
-      });
-      setDeleteTarget(null);
+    const target = deleteTarget;
+
+    if (
+      !target?.id
+      || saving
+      || actionLockRef.current
+    ) {
       return;
     }
 
+    actionLockRef.current = true;
+    setBusyThemeId(target.id);
     setSaving(true);
+
     try {
-      await base44.entities.PresentationTheme.delete(deleteTarget.id);
-      setThemes((current) => current.filter((theme) => theme.id !== deleteTarget.id));
-      toast({ title: 'Tema excluído' });
+      const [
+        currentPresentations,
+        currentPreferences,
+      ] = await Promise.all([
+        base44.entities.Presentation.filter({
+          theme_id: target.id,
+        }),
+        base44.entities.UserPreference.filter({
+          default_theme_id: target.id,
+        }),
+      ]);
+
+      const presentationUsage = uniqueById(
+        currentPresentations,
+      ).length;
+
+      const preferenceUsage = uniqueById(
+        currentPreferences,
+      ).length;
+
+      if (
+        presentationUsage > 0
+        || preferenceUsage > 0
+      ) {
+        toast({
+          title: 'Tema em uso',
+          description:
+            'Desative o tema em vez de excluí-lo, ou remova primeiro seus vínculos.',
+          variant: 'destructive',
+        });
+
+        setDeleteTarget(null);
+        return;
+      }
+
+      await base44.entities.PresentationTheme.delete(
+        target.id,
+      );
+
+      setThemes((current) => current.filter(
+        (theme) => theme.id !== target.id,
+      ));
+
+      toast({
+        title: 'Tema excluído',
+      });
+
       setDeleteTarget(null);
     } catch (error) {
       console.error('Erro ao excluir tema:', error);
-      toast({ title: 'Não foi possível excluir', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível excluir',
+        description:
+          'Atualize a lista e tente novamente.',
+        variant: 'destructive',
+      });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
+      setBusyThemeId('');
       setSaving(false);
     }
   };
@@ -592,12 +803,19 @@ export default function AdminThemes() {
               setRefreshing(true);
               loadData({ silent: true });
             }}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyThemeId)
+            }
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
-          <Button onClick={openCreate}>
+          <Button
+            onClick={openCreate}
+            disabled={saving || Boolean(busyThemeId)}
+          >
             <Plus className="mr-2 h-4 w-4" />
             Novo tema
           </Button>
