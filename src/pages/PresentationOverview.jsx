@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -33,6 +33,7 @@ import {
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import EmptyState from '@/components/shared/EmptyState';
+import useCurrentUser from '@/hooks/useCurrentUser';
 
 const INTRODUCTION_TERMS = [
   'introdução',
@@ -71,6 +72,31 @@ function containsAnyTerm(value, terms) {
 function toNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+
+function uniqueById(items) {
+  const map = new Map();
+
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    if (item?.id && !map.has(item.id)) {
+      map.set(item.id, item);
+    }
+  });
+
+  return [...map.values()];
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    draft: 'Rascunho',
+    ready: 'Pronta',
+    in_progress: 'Em andamento',
+    completed: 'Concluída',
+    archived: 'Arquivada',
+  };
+
+  return labels[status] || status || 'Sem status';
 }
 
 function clampPercentage(value) {
@@ -336,7 +362,9 @@ function StructureRow({
 
 export default function PresentationOverview() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const { toast } = useToast();
+  const { user, loading: userLoading } = useCurrentUser();
 
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
@@ -350,10 +378,12 @@ export default function PresentationOverview() {
 
   const loadOverview = useCallback(
     async ({ silent = false } = {}) => {
-      if (!id) {
+      if (!id || !user?.id) {
+        if (!id) {
         setError(
           'Identificador da apresentação não encontrado.',
         );
+        }
         setLoading(false);
         return;
       }
@@ -379,19 +409,22 @@ export default function PresentationOverview() {
           ),
         ]);
 
-        setPresentation(presentationData || null);
+        if (!presentationData) {
+          throw new Error('presentation_not_found');
+        }
 
-        setBlocks(
-          Array.isArray(blockRows)
-            ? blockRows
-            : [],
-        );
+        if (presentationData.user_id !== user.id) {
+          throw new Error('access_denied');
+        }
+
+        const normalizedBlocks = uniqueById(blockRows);
+
+        setPresentation(presentationData);
+        setBlocks(normalizedBlocks);
 
         const parentIds = new Set(
           (
-            Array.isArray(blockRows)
-              ? blockRows
-              : []
+            normalizedBlocks
           )
             .filter((block) => block.parent_id)
             .map((block) => block.parent_id),
@@ -404,9 +437,15 @@ export default function PresentationOverview() {
           loadError,
         );
 
-        setError(
-          'Não foi possível carregar a visão geral desta apresentação.',
-        );
+        const message = loadError?.message === 'access_denied'
+          ? 'Você não tem permissão para acessar esta apresentação.'
+          : loadError?.message === 'presentation_not_found'
+            ? 'A apresentação não foi encontrada.'
+            : 'Não foi possível carregar a visão geral desta apresentação.';
+
+        setPresentation(null);
+        setBlocks([]);
+        setError(message);
 
         toast({
           title: 'Falha ao carregar apresentação',
@@ -421,15 +460,26 @@ export default function PresentationOverview() {
     [
       id,
       toast,
+      user?.id,
     ],
   );
 
   useEffect(() => {
-    loadOverview();
-  }, [loadOverview]);
+    if (!userLoading && user?.id) {
+      loadOverview();
+    } else if (!userLoading && !user) {
+      setLoading(false);
+      setError('Entre na sua conta para acessar esta apresentação.');
+    }
+  }, [loadOverview, user, userLoading]);
 
   const orderedBlocks = useMemo(
     () => getOrderedTree(blocks),
+    [blocks],
+  );
+
+  const blockById = useMemo(
+    () => new Map(blocks.map((block) => [block.id, block])),
     [blocks],
   );
 
@@ -474,17 +524,14 @@ export default function PresentationOverview() {
           return false;
         }
 
-        const parent = blocks.find(
-          (item) => item.id === currentParentId,
-        );
-
+        const parent = blockById.get(currentParentId);
         currentParentId = parent?.parent_id || null;
       }
 
       return true;
     });
   }, [
-    blocks,
+    blockById,
     childrenMap,
     expandedIds,
     orderedBlocks,
@@ -802,7 +849,7 @@ export default function PresentationOverview() {
     setExpandedIds(new Set());
   };
 
-  if (loading) {
+  if (loading || userLoading) {
     return <OverviewLoading />;
   }
 
@@ -868,11 +915,7 @@ export default function PresentationOverview() {
 
             {presentation.status && (
               <Badge variant="outline">
-                {presentation.status === 'draft' && 'Rascunho'}
-                {presentation.status === 'ready' && 'Pronta'}
-                {presentation.status === 'in_progress' && 'Em andamento'}
-                {presentation.status === 'completed' && 'Concluída'}
-                {presentation.status === 'archived' && 'Arquivada'}
+                {getStatusLabel(presentation.status)}
               </Badge>
             )}
           </div>
@@ -919,7 +962,7 @@ export default function PresentationOverview() {
             asChild
             variant="outline"
           >
-            <Link to={`/presentation-editor/${presentation.id}`}>
+            <Link to={`/presentations/${presentation.id}/editor`}>
               <Pencil className="mr-2 h-4 w-4" />
               Editar
             </Link>
@@ -1095,7 +1138,7 @@ export default function PresentationOverview() {
                   description="Abra o editor e adicione introdução, pontos principais e conclusão."
                   actionLabel="Abrir editor"
                   onAction={() => {
-                    window.location.href = `/presentation-editor/${presentation.id}`;
+                    navigate(`/presentations/${presentation.id}/editor`);
                   }}
                 />
               ) : (
@@ -1288,7 +1331,7 @@ export default function PresentationOverview() {
                   asChild
                   variant="outline"
                 >
-                  <Link to={`/presentation-editor/${presentation.id}`}>
+                  <Link to={`/presentations/${presentation.id}/editor`}>
                     <Pencil className="mr-2 h-4 w-4" />
                     Continuar editando
                   </Link>
