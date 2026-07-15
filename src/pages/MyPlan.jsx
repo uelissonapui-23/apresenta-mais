@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -69,6 +69,16 @@ function formatCurrency(value) {
   }).format(Number(value) || 0);
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) map.set(row.id, row);
+  }
+
+  return [...map.values()];
+}
+
 function LoadingState() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
@@ -115,11 +125,26 @@ export default function MyPlan() {
 
   const [requestOpen, setRequestOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [requestedPlanId, setRequestedPlanId] = useState('');
+  const [cancellingRequestId, setCancellingRequestId] = useState('');
+  const cancelLockRef = useRef(false);
 
   const currentPlan = useMemo(
     () => plans.find((p) => p.id === profile?.plan_id),
     [plans, profile?.plan_id],
   );
+
+  const plansForRequest = useMemo(() => {
+    if (!requestedPlanId) return plans;
+
+    const selected = plans.find((plan) => plan.id === requestedPlanId);
+    if (!selected) return plans;
+
+    return [
+      selected,
+      ...plans.filter((plan) => plan.id !== requestedPlanId),
+    ];
+  }, [plans, requestedPlanId]);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!user?.id) {
@@ -138,11 +163,17 @@ export default function MyPlan() {
         base44.entities.Presentation.filter({ user_id: user.id }, '-created_date', 500),
       ]);
 
-      setPlans(Array.isArray(planRows) ? planRows : []);
-      setPaymentConfig(Array.isArray(configRows) && configRows.length > 0 ? configRows[0] : null);
-      setRequests(Array.isArray(requestRows) ? requestRows : []);
-      setContributions(Array.isArray(contributionRows) ? contributionRows : []);
-      setPresentationsCount(Array.isArray(presRows) ? presRows.length : 0);
+      const loadedPlans = uniqueById(planRows);
+      const loadedConfigs = uniqueById(configRows);
+      const loadedRequests = uniqueById(requestRows);
+      const loadedContributions = uniqueById(contributionRows);
+      const loadedPresentations = uniqueById(presRows);
+
+      setPlans(loadedPlans);
+      setPaymentConfig(loadedConfigs[0] || null);
+      setRequests(loadedRequests);
+      setContributions(loadedContributions);
+      setPresentationsCount(loadedPresentations.length);
     } catch {
       toast({
         title: 'Não foi possível carregar',
@@ -160,14 +191,59 @@ export default function MyPlan() {
   }, [userLoading, loadData]);
 
   const handleCancelRequest = async (requestId) => {
+    if (!requestId || cancelLockRef.current || cancellingRequestId) return;
+
+    const request = requests.find((item) => item.id === requestId);
+
+    if (
+      !request
+      || request.user_id !== user?.id
+      || !['pending', 'under_review'].includes(request.status)
+    ) {
+      toast({
+        title: 'Solicitação não pode ser cancelada',
+        description: 'Atualize a página para conferir o status mais recente.',
+        variant: 'destructive',
+      });
+      await loadData({ silent: true });
+      return;
+    }
+
+    cancelLockRef.current = true;
+    setCancellingRequestId(requestId);
+
     try {
-      await base44.entities.PlanRequest.update(requestId, { status: 'cancelled' });
+      await base44.entities.PlanRequest.update(requestId, {
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        cancelled_by_user_id: user.id,
+      });
+
       setRequests((current) =>
-        current.map((r) => (r.id === requestId ? { ...r, status: 'cancelled' } : r)),
+        current.map((item) => (
+          item.id === requestId
+            ? {
+                ...item,
+                status: 'cancelled',
+                cancelled_at: new Date().toISOString(),
+                cancelled_by_user_id: user.id,
+              }
+            : item
+        )),
       );
+
       toast({ title: 'Solicitação cancelada' });
-    } catch {
-      toast({ title: 'Não foi possível cancelar', variant: 'destructive' });
+    } catch (error) {
+      console.error('Erro ao cancelar solicitação:', error);
+      toast({
+        title: 'Não foi possível cancelar',
+        description: 'A solicitação pode ter sido analisada enquanto você estava nesta página.',
+        variant: 'destructive',
+      });
+      await loadData({ silent: true });
+    } finally {
+      cancelLockRef.current = false;
+      setCancellingRequestId('');
     }
   };
 
@@ -202,7 +278,7 @@ export default function MyPlan() {
             setRefreshing(true);
             loadData({ silent: true });
           }}
-          disabled={refreshing}
+          disabled={refreshing || Boolean(cancellingRequestId)}
           className="w-full sm:w-auto"
         >
           <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -329,7 +405,14 @@ export default function MyPlan() {
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <Button
-              onClick={() => setRequestOpen(true)}
+              onClick={() => {
+                setRequestedPlanId(
+                  planAccess.isPlanActive && !planAccess.permanentAdFree
+                    ? profile?.plan_id || ''
+                    : '',
+                );
+                setRequestOpen(true);
+              }}
               className="flex-1"
             >
               <CreditCard className="mr-2 h-4 w-4" />
@@ -418,6 +501,7 @@ export default function MyPlan() {
                         size="sm"
                         className="mt-3 w-full"
                         onClick={() => {
+                          setRequestedPlanId(plan.id);
                           setRequestOpen(true);
                         }}
                       >
@@ -480,7 +564,11 @@ export default function MyPlan() {
                         size="sm"
                         className="shrink-0"
                         onClick={() => handleCancelRequest(req.id)}
+                        disabled={Boolean(cancellingRequestId)}
                       >
+                        {cancellingRequestId === req.id && (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        )}
                         Cancelar
                       </Button>
                     )}
@@ -534,8 +622,11 @@ export default function MyPlan() {
 
       <PlanRequestDialog
         open={requestOpen}
-        onOpenChange={setRequestOpen}
-        plans={plans}
+        onOpenChange={(open) => {
+          setRequestOpen(open);
+          if (!open) setRequestedPlanId('');
+        }}
+        plans={plansForRequest}
         paymentConfig={paymentConfig}
         userId={user?.id || ''}
         currentPlanId={profile?.plan_id || ''}
