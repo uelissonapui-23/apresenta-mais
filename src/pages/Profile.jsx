@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -149,12 +150,94 @@ function isValidHttpUrl(value) {
   }
 }
 
-function getFirstRecord(rows) {
-  return (
-    Array.isArray(rows)
-      ? rows[0] || null
-      : null
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || record?.started_at
+    || ''
   );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function normalizeDate(value, { endOfDay = false } = {}) {
+  if (!value) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+
+  const date = new Date(
+    dateOnly
+      ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`
+      : raw,
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isProfilePlanActive(profile) {
+  if (!profile?.plan_id) {
+    return false;
+  }
+
+  const status = String(profile.plan_status || 'none')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'permanent') {
+    return true;
+  }
+
+  if (status !== 'active') {
+    return false;
+  }
+
+  const expiration = normalizeDate(
+    profile.plan_expires_at,
+    { endOfDay: true },
+  );
+
+  return !expiration || expiration.getTime() >= Date.now();
 }
 
 function StatCard({
@@ -233,6 +316,10 @@ export default function Profile() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [loadError, setLoadError] = useState('');
 
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const logoutLockRef = useRef(false);
+
   const displayEmail = user?.email || '';
 
   const initials = useMemo(
@@ -259,11 +346,24 @@ export default function Profile() {
 
   const loadProfileData = useCallback(
     async ({ silent = false } = {}) => {
+      if (loadLockRef.current) {
+        return;
+      }
+
       if (!user?.id) {
+        setPlan(null);
+        setStats({
+          presentations: 0,
+          sessions: 0,
+          completedSessions: 0,
+        });
+        setLoadError('Entre na sua conta para acessar o perfil.');
         setLoading(false);
         setRefreshing(false);
         return;
       }
+
+      loadLockRef.current = true;
 
       if (!silent) {
         setLoading(true);
@@ -309,32 +409,42 @@ export default function Profile() {
             '-created_date',
           ),
 
-          profile?.plan_id
-            ? base44.entities.Plan.filter(
-                {
-                  id: profile.plan_id,
-                },
-                '-updated_date',
-                1,
-              )
+          profile?.plan_id && isProfilePlanActive(profile)
+            ? base44.entities.Plan.filter({
+                id: profile.plan_id,
+              })
             : Promise.resolve([]),
         ]);
 
-        const safePresentations = (
-          Array.isArray(presentationRows)
-            ? presentationRows
-            : []
+        const safePresentations = uniqueById(
+          presentationRows,
+        ).filter(
+          (item) => item.user_id === user.id,
         );
 
-        const safeSessions = (
-          Array.isArray(sessionRows)
-            ? sessionRows
-            : []
+        const validPresentationIds = new Set(
+          safePresentations.map(
+            (item) => item.id,
+          ),
+        );
+
+        const safeSessions = uniqueById(
+          sessionRows,
+        ).filter(
+          (item) => (
+            item.user_id === user.id
+            && validPresentationIds.has(
+              item.presentation_id,
+            )
+          ),
         );
 
         setStats({
           presentations: safePresentations.filter(
-            (item) => !item.is_archived,
+            (item) => (
+              item.is_archived !== true
+              && item.status !== 'archived'
+            ),
           ).length,
 
           sessions: safeSessions.length,
@@ -345,7 +455,9 @@ export default function Profile() {
         });
 
         setPlan(
-          getFirstRecord(planRows),
+          uniqueById(planRows).find(
+            (item) => item.id === profile?.plan_id,
+          ) || null,
         );
       } catch (error) {
         console.error(
@@ -364,6 +476,7 @@ export default function Profile() {
           variant: 'destructive',
         });
       } finally {
+        loadLockRef.current = false;
         setLoading(false);
         setRefreshing(false);
       }
@@ -372,7 +485,9 @@ export default function Profile() {
       profile?.avatar_url,
       profile?.name,
       profile?.phone,
+      profile?.plan_expires_at,
       profile?.plan_id,
+      profile?.plan_status,
       toast,
       user?.full_name,
       user?.id,
@@ -466,6 +581,7 @@ export default function Profile() {
     if (
       !user?.id
       || saving
+      || saveLockRef.current
     ) {
       return;
     }
@@ -476,6 +592,7 @@ export default function Profile() {
       return;
     }
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
@@ -490,10 +607,16 @@ export default function Profile() {
         savedProfile = await base44.entities.UserProfile.create({
           user_id: user.id,
           ...payload,
-          role: 'user',
+          role: user?.role === 'admin' ? 'admin' : 'user',
           onboarding_completed: true,
           active: true,
         });
+      }
+
+      if (!savedProfile?.id) {
+        throw new Error(
+          'O perfil não retornou um ID válido.',
+        );
       }
 
       const normalizedForm = {
@@ -536,6 +659,7 @@ export default function Profile() {
 
       return null;
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
@@ -545,6 +669,14 @@ export default function Profile() {
   };
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || saving
+      || loadLockRef.current
+    ) {
+      return;
+    }
+
     setRefreshing(true);
 
     try {
@@ -562,10 +694,14 @@ export default function Profile() {
   };
 
   const handleLogout = async () => {
-    if (loggingOut) {
+    if (
+      loggingOut
+      || logoutLockRef.current
+    ) {
       return;
     }
 
+    logoutLockRef.current = true;
     setLoggingOut(true);
 
     try {
@@ -581,6 +717,7 @@ export default function Profile() {
         error,
       );
 
+      logoutLockRef.current = false;
       setLoggingOut(false);
 
       toast({
@@ -597,6 +734,35 @@ export default function Profile() {
     || loading
   ) {
     return <ProfileLoading />;
+  }
+
+  if (!user?.id) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center px-4">
+        <Card className="w-full border-dashed">
+          <CardContent className="flex flex-col items-center p-8 text-center sm:p-10">
+            <UserRound className="h-10 w-10 text-muted-foreground" />
+
+            <h1 className="mt-4 text-xl font-semibold">
+              Entre para acessar seu perfil
+            </h1>
+
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Suas informações pessoais e dados do plano ficam vinculados à sua conta.
+            </p>
+
+            <Button
+              className="mt-5"
+              onClick={() => {
+                window.location.href = '/login';
+              }}
+            >
+              Entrar
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   const roleLabel = (
@@ -635,7 +801,11 @@ export default function Profile() {
           variant="outline"
           size="sm"
           onClick={handleRefresh}
-          disabled={refreshing}
+          disabled={
+            refreshing
+            || saving
+            || loadLockRef.current
+          }
           className="w-full sm:w-auto"
         >
           <RefreshCw
@@ -660,6 +830,11 @@ export default function Profile() {
               variant="outline"
               size="sm"
               onClick={handleRefresh}
+              disabled={
+                refreshing
+                || saving
+                || loadLockRef.current
+              }
             >
               Tentar novamente
             </Button>
@@ -1032,7 +1207,11 @@ export default function Profile() {
                 variant="destructive"
                 className="w-full"
                 onClick={handleLogout}
-                disabled={loggingOut}
+                disabled={
+                  loggingOut
+                  || saving
+                  || refreshing
+                }
               >
                 {loggingOut ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
