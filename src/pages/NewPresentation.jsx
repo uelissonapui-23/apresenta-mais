@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -138,6 +138,85 @@ function normalizeDuration(value) {
   }
 
   return Math.min(1440, Math.max(1, Math.round(number)));
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function isAssignedPlanActive(profile) {
+  if (!profile?.plan_id) {
+    return false;
+  }
+
+  const status = String(profile.plan_status || 'none')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'permanent') {
+    return true;
+  }
+
+  if (status !== 'active') {
+    return false;
+  }
+
+  if (!profile.plan_expires_at) {
+    return true;
+  }
+
+  const rawExpiration = String(profile.plan_expires_at).trim();
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(rawExpiration);
+
+  const expiration = new Date(
+    dateOnly
+      ? `${rawExpiration}T23:59:59.999`
+      : rawExpiration,
+  );
+
+  if (Number.isNaN(expiration.getTime())) {
+    return true;
+  }
+
+  return expiration.getTime() >= Date.now();
 }
 
 function LoadingState() {
@@ -331,6 +410,7 @@ export default function NewPresentation() {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const savingLockRef = useRef(false);
   const [loadError, setLoadError] = useState('');
   const [validationError, setValidationError] = useState('');
 
@@ -371,16 +451,12 @@ export default function NewPresentation() {
           : Promise.resolve([]),
       ]);
 
-      const safeTypes = Array.isArray(typeRows) ? typeRows : [];
-      const safeObjectives = Array.isArray(objectiveRows) ? objectiveRows : [];
-      const safeStyles = Array.isArray(styleRows) ? styleRows : [];
-      const safeThemes = Array.isArray(themeRows) ? themeRows : [];
-      const currentPreference = Array.isArray(preferenceRows)
-        ? preferenceRows[0] || null
-        : null;
-      const currentProfile = Array.isArray(profileRows)
-        ? profileRows[0] || null
-        : null;
+      const safeTypes = uniqueById(typeRows);
+      const safeObjectives = uniqueById(objectiveRows);
+      const safeStyles = uniqueById(styleRows);
+      const safeThemes = uniqueById(themeRows);
+      const currentPreference = selectCurrentRecord(preferenceRows);
+      const currentProfile = selectCurrentRecord(profileRows);
 
       setTypes(safeTypes);
       setObjectives(safeObjectives);
@@ -388,13 +464,17 @@ export default function NewPresentation() {
       setThemes(safeThemes);
       setPreference(currentPreference);
 
-      if (currentProfile?.plan_id) {
+      if (currentProfile?.plan_id && isAssignedPlanActive(currentProfile)) {
         try {
           const planRows = await base44.entities.Plan.filter({
             id: currentProfile.plan_id,
-            active: true,
           });
-          setPlan(Array.isArray(planRows) ? planRows[0] || null : null);
+
+          setPlan(
+            uniqueById(planRows)
+              .find((item) => item.id === currentProfile.plan_id)
+            || null,
+          );
         } catch (planError) {
           console.warn('Não foi possível carregar o plano atual:', planError);
           setPlan(null);
@@ -500,7 +580,7 @@ export default function NewPresentation() {
   };
 
   const handleCreate = async () => {
-    if (saving) {
+    if (saving || savingLockRef.current) {
       return;
     }
 
@@ -520,6 +600,7 @@ export default function NewPresentation() {
       return;
     }
 
+    savingLockRef.current = true;
     setSaving(true);
     setValidationError('');
 
@@ -532,8 +613,9 @@ export default function NewPresentation() {
           is_archived: false,
         });
 
-        if (Array.isArray(currentPresentations)
-          && currentPresentations.length >= maxPresentations) {
+        const uniquePresentations = uniqueById(currentPresentations);
+
+        if (uniquePresentations.length >= maxPresentations) {
           throw new Error('PLAN_LIMIT_REACHED');
         }
       }
@@ -601,6 +683,7 @@ export default function NewPresentation() {
         variant: 'destructive',
       });
     } finally {
+      savingLockRef.current = false;
       setSaving(false);
     }
   };
