@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -20,6 +21,7 @@ import {
   LayoutList,
   LayoutTemplate,
   Loader2,
+  Lock,
   RefreshCw,
   Search,
   Sparkles,
@@ -63,6 +65,68 @@ function normalizeText(value) {
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .trim();
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function normalizeDate(value, { endOfDay = false } = {}) {
+  if (!value) return null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+  const date = new Date(
+    dateOnly
+      ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`
+      : raw,
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isProfilePlanActive(profile) {
+  if (!profile?.plan_id) return false;
+
+  const status = String(profile.plan_status || 'none')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'permanent') return true;
+  if (status !== 'active') return false;
+
+  const expiration = normalizeDate(
+    profile.plan_expires_at,
+    { endOfDay: true },
+  );
+
+  return !expiration || expiration.getTime() >= Date.now();
+}
+
+function sortDeepestFirst(blocks) {
+  return [...blocks].sort((left, right) => {
+    const depthDifference = (
+      Number(right?.depth_level || 0)
+      - Number(left?.depth_level || 0)
+    );
+
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return Number(right?.order_index || 0)
+      - Number(left?.order_index || 0);
+  });
 }
 
 function sortTemplateBlocks(blocks) {
@@ -121,6 +185,7 @@ function TemplateCard({
   onPreview,
   onUse,
   isUsing,
+  isLocked,
 }) {
   return (
     <Card className="group h-full overflow-hidden border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
@@ -215,13 +280,16 @@ function TemplateCard({
             type="button"
             onClick={() => onUse(template)}
             disabled={isUsing}
+            variant={isLocked ? 'secondary' : 'default'}
           >
             {isUsing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : isLocked ? (
+              <Lock className="mr-2 h-4 w-4" />
             ) : (
               <Copy className="mr-2 h-4 w-4" />
             )}
-            Usar modelo
+            {isLocked ? 'Ver plano' : 'Usar modelo'}
           </Button>
         </div>
       </CardContent>
@@ -238,6 +306,7 @@ function TemplateListItem({
   onPreview,
   onUse,
   isUsing,
+  isLocked,
 }) {
   return (
     <Card className="border-border/70 transition-all hover:border-primary/30 hover:shadow-sm">
@@ -301,13 +370,16 @@ function TemplateListItem({
             type="button"
             onClick={() => onUse(template)}
             disabled={isUsing}
+            variant={isLocked ? 'secondary' : 'default'}
           >
             {isUsing ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : isLocked ? (
+              <Lock className="mr-2 h-4 w-4" />
             ) : (
               <Copy className="mr-2 h-4 w-4" />
             )}
-            Usar
+            {isLocked ? 'Ver plano' : 'Usar'}
           </Button>
         </div>
       </CardContent>
@@ -400,7 +472,12 @@ function PreviewBlockRow({
 export default function Templates() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    profile,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
 
   const [templates, setTemplates] = useState([]);
   const [templateBlocks, setTemplateBlocks] = useState([]);
@@ -409,6 +486,7 @@ export default function Templates() {
   const [styles, setStyles] = useState([]);
   const [blockTypes, setBlockTypes] = useState([]);
   const [themes, setThemes] = useState([]);
+  const [currentPlan, setCurrentPlan] = useState(null);
 
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState(ALL_VALUE);
@@ -420,6 +498,7 @@ export default function Templates() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [usingTemplateId, setUsingTemplateId] = useState('');
+  const useTemplateLockRef = useRef(false);
 
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [expandedPreviewBlocks, setExpandedPreviewBlocks] = useState(
@@ -442,6 +521,7 @@ export default function Templates() {
         styleRows,
         blockTypeRows,
         themeRows,
+        planRows,
       ] = await Promise.all([
         base44.entities.PresentationTemplate.filter(
           { active: true },
@@ -468,17 +548,34 @@ export default function Templates() {
           { active: true },
           'name',
         ),
+        profile?.plan_id && isProfilePlanActive(profile)
+          ? base44.entities.Plan.filter({
+              id: profile.plan_id,
+            })
+          : Promise.resolve([]),
       ]);
 
-      setTemplates(Array.isArray(templateRows) ? templateRows : []);
-      setTemplateBlocks(
-        Array.isArray(templateBlockRows) ? templateBlockRows : [],
+      const normalizedTemplates = uniqueById(templateRows);
+      const validTemplateIds = new Set(
+        normalizedTemplates.map((template) => template.id),
       );
-      setTypes(Array.isArray(typeRows) ? typeRows : []);
-      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
-      setStyles(Array.isArray(styleRows) ? styleRows : []);
-      setBlockTypes(Array.isArray(blockTypeRows) ? blockTypeRows : []);
-      setThemes(Array.isArray(themeRows) ? themeRows : []);
+
+      setTemplates(normalizedTemplates);
+      setTemplateBlocks(
+        uniqueById(templateBlockRows).filter(
+          (block) => validTemplateIds.has(block.template_id),
+        ),
+      );
+      setTypes(uniqueById(typeRows));
+      setObjectives(uniqueById(objectiveRows));
+      setStyles(uniqueById(styleRows));
+      setBlockTypes(uniqueById(blockTypeRows));
+      setThemes(uniqueById(themeRows));
+      setCurrentPlan(
+        uniqueById(planRows).find(
+          (plan) => plan.id === profile?.plan_id,
+        ) || null,
+      );
     } catch (error) {
       console.error('Erro ao carregar modelos:', error);
       setLoadError('Não foi possível carregar os modelos agora.');
@@ -492,7 +589,7 @@ export default function Templates() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast]);
+  }, [profile, toast]);
 
   useEffect(() => {
     loadPage();
@@ -632,6 +729,22 @@ export default function Templates() {
     user?.id,
   ]);
 
+  const canUsePremiumTemplates = Boolean(
+    isAdmin
+    || (
+      isProfilePlanActive(profile)
+      && currentPlan?.can_use_premium_templates === true
+    ),
+  );
+
+  const isTemplateLocked = useCallback(
+    (template) => Boolean(
+      template?.is_premium
+      && !canUsePremiumTemplates
+    ),
+    [canUsePremiumTemplates],
+  );
+
   const previewBlocks = previewTemplate
     ? blocksByTemplate.get(previewTemplate.id) || []
     : [];
@@ -694,109 +807,152 @@ export default function Templates() {
 
   const copyTemplateBlocks = async (templateId, presentationId) => {
     const sourceBlocks = sortTemplateBlocks(
-      blocksByTemplate.get(templateId) || [],
+      uniqueById(blocksByTemplate.get(templateId) || []),
     );
 
     if (sourceBlocks.length === 0) {
-      return;
+      throw new Error('Este modelo não possui uma estrutura válida.');
     }
 
     const idMap = new Map();
+    const createdBlocks = [];
     const pending = [...sourceBlocks];
-    let safetyCounter = 0;
+    let safetyCounter = sourceBlocks.length + 1;
 
-    while (pending.length > 0 && safetyCounter < sourceBlocks.length + 5) {
-      safetyCounter += 1;
+    while (pending.length > 0 && safetyCounter > 0) {
+      safetyCounter -= 1;
       let createdInThisRound = 0;
 
       for (let index = pending.length - 1; index >= 0; index -= 1) {
-        const source = pending[index];
-        const canCreate = !source.parent_id || idMap.has(source.parent_id);
+        const sourceBlock = pending[index];
 
-        if (!canCreate) {
+        const parentReady = (
+          !sourceBlock.parent_id
+          || idMap.has(sourceBlock.parent_id)
+        );
+
+        if (!parentReady) {
           continue;
         }
 
         const created = await base44.entities.PresentationBlock.create({
           presentation_id: presentationId,
-          parent_id: source.parent_id
-            ? idMap.get(source.parent_id)
+          parent_id: sourceBlock.parent_id
+            ? idMap.get(sourceBlock.parent_id)
             : '',
-          block_type_id: source.block_type_id || '',
-          title: source.title || 'Novo tópico',
-          summary: source.summary || '',
-          content: source.content || '',
-          additional_content: '',
-          presenter_notes: source.presenter_notes || '',
-          order_index: Number(source.order_index) || 0,
-          depth_level: Number(source.depth_level) || 0,
-          importance_level: Number(source.importance_level) || 3,
+          block_type_id: sourceBlock.block_type_id || '',
+          title: sourceBlock.title || 'Novo tópico',
+          summary: sourceBlock.summary || '',
+          content: sourceBlock.content || '',
+          additional_content: sourceBlock.additional_content || '',
+          presenter_notes: sourceBlock.presenter_notes || '',
+          order_index: Number(sourceBlock.order_index) || 0,
+          depth_level: Number(sourceBlock.depth_level) || 0,
+          importance_level: Number(sourceBlock.importance_level) || 3,
           estimated_duration_seconds:
-            Number(source.estimated_duration_seconds) || 60,
-          is_essential: Boolean(source.is_essential),
-          is_hidden: false,
-          is_collapsed: false,
-          show_to_audience: true,
-          icon: '',
-          background_style: '',
-          text_style: '',
+            Number(sourceBlock.estimated_duration_seconds) || 60,
+          is_essential: Boolean(sourceBlock.is_essential),
+          is_hidden: Boolean(sourceBlock.is_hidden),
+          is_collapsed: Boolean(sourceBlock.is_collapsed),
+          show_to_audience: sourceBlock.show_to_audience !== false,
+          icon: sourceBlock.icon || '',
+          background_style: sourceBlock.background_style || '',
+          text_style: sourceBlock.text_style || '',
         });
 
-        idMap.set(source.id, created.id);
+        if (!created?.id) {
+          throw new Error('A cópia de um bloco não retornou um ID válido.');
+        }
+
+        idMap.set(sourceBlock.id, created.id);
+        createdBlocks.push(created);
         pending.splice(index, 1);
         createdInThisRound += 1;
       }
 
       if (createdInThisRound === 0) {
-        break;
+        throw new Error(
+          'A hierarquia deste modelo está incompleta ou possui referências inválidas.',
+        );
       }
     }
 
     if (pending.length > 0) {
-      for (const source of pending) {
-        await base44.entities.PresentationBlock.create({
-          presentation_id: presentationId,
-          parent_id: '',
-          block_type_id: source.block_type_id || '',
-          title: source.title || 'Novo tópico',
-          summary: source.summary || '',
-          content: source.content || '',
-          additional_content: '',
-          presenter_notes: source.presenter_notes || '',
-          order_index: Number(source.order_index) || 0,
-          depth_level: 0,
-          importance_level: Number(source.importance_level) || 3,
-          estimated_duration_seconds:
-            Number(source.estimated_duration_seconds) || 60,
-          is_essential: Boolean(source.is_essential),
-          is_hidden: false,
-          is_collapsed: false,
-          show_to_audience: true,
-          icon: '',
-          background_style: '',
-          text_style: '',
-        });
-      }
+      throw new Error('A estrutura do modelo não pôde ser copiada por completo.');
     }
+
+    return createdBlocks;
   };
 
   const handleUseTemplate = async (template) => {
-    if (!user?.id || usingTemplateId) {
+    if (
+      !template?.id
+      || !user?.id
+      || usingTemplateId
+      || useTemplateLockRef.current
+    ) {
       return;
     }
 
+    const belongsToCurrentUser = template.owner_user_id === user.id;
+    const canView = (
+      template.is_public
+      || template.is_official
+      || belongsToCurrentUser
+    );
+
+    if (!canView) {
+      toast({
+        title: 'Modelo indisponível',
+        description: 'Este modelo não está disponível para sua conta.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (isTemplateLocked(template)) {
+      toast({
+        title: 'Modelo disponível em um plano superior',
+        description:
+          'Confira os planos que liberam modelos premium.',
+      });
+
+      navigate('/my-plan');
+      return;
+    }
+
+    useTemplateLockRef.current = true;
     setUsingTemplateId(template.id);
 
     let createdPresentation = null;
+    let createdBlocks = [];
 
     try {
+      const maxPresentations = Number(currentPlan?.max_presentations);
+
+      if (
+        isProfilePlanActive(profile)
+        && Number.isFinite(maxPresentations)
+        && maxPresentations >= 0
+      ) {
+        const currentPresentations = uniqueById(
+          await base44.entities.Presentation.filter({
+            user_id: user.id,
+          }),
+        );
+
+        if (currentPresentations.length >= maxPresentations) {
+          throw new Error('PLAN_LIMIT_REACHED');
+        }
+      }
+
       const stats = templateStats.get(template.id);
       const estimatedMinutes = stats?.estimatedSeconds > 0
         ? Math.max(1, Math.round(stats.estimatedSeconds / 60))
         : 30;
 
       const defaultTheme = themes.find(
-        (theme) => theme.active && !theme.is_premium,
+        (theme) => theme.active !== false && !theme.is_premium,
       ) || themes[0];
 
       createdPresentation = await base44.entities.Presentation.create({
@@ -823,7 +979,14 @@ export default function Templates() {
         last_opened_at: new Date().toISOString(),
       });
 
-      await copyTemplateBlocks(template.id, createdPresentation.id);
+      if (!createdPresentation?.id) {
+        throw new Error('A apresentação não retornou um ID válido.');
+      }
+
+      createdBlocks = await copyTemplateBlocks(
+        template.id,
+        createdPresentation.id,
+      );
 
       toast({
         title: 'Apresentação criada',
@@ -835,23 +998,54 @@ export default function Templates() {
     } catch (error) {
       console.error('Erro ao usar modelo:', error);
 
-      if (createdPresentation?.id) {
+      for (const block of sortDeepestFirst(createdBlocks)) {
         try {
-          await base44.entities.Presentation.delete(createdPresentation.id);
+          await base44.entities.PresentationBlock.delete(block.id);
         } catch (cleanupError) {
           console.error(
-            'Não foi possível remover apresentação incompleta:',
+            'Não foi possível remover um bloco incompleto:',
+            cleanupError,
+          );
+        }
+      }
+
+      if (createdPresentation?.id) {
+        try {
+          const leftoverBlocks = uniqueById(
+            await base44.entities.PresentationBlock.filter({
+              presentation_id: createdPresentation.id,
+            }),
+          );
+
+          for (const block of sortDeepestFirst(leftoverBlocks)) {
+            await base44.entities.PresentationBlock.delete(block.id);
+          }
+
+          await base44.entities.Presentation.delete(
+            createdPresentation.id,
+          );
+        } catch (cleanupError) {
+          console.error(
+            'Não foi possível remover a apresentação incompleta:',
             cleanupError,
           );
         }
       }
 
       toast({
-        title: 'Não foi possível usar o modelo',
-        description: 'Nenhuma apresentação completa foi criada. Tente novamente.',
+        title: error.message === 'PLAN_LIMIT_REACHED'
+          ? 'Limite de apresentações atingido'
+          : 'Não foi possível usar o modelo',
+        description: error.message === 'PLAN_LIMIT_REACHED'
+          ? 'Exclua uma apresentação ou altere seu plano para continuar.'
+          : (
+            error.message
+            || 'Nenhuma apresentação completa foi criada. Tente novamente.'
+          ),
         variant: 'destructive',
       });
     } finally {
+      useTemplateLockRef.current = false;
       setUsingTemplateId('');
     }
   };
@@ -863,6 +1057,20 @@ export default function Templates() {
 
   if (userLoading || loading) {
     return <TemplatesLoading />;
+  }
+
+  if (!user?.id) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center px-4">
+        <EmptyState
+          icon={UserRound}
+          title="Entre para usar os modelos"
+          description="Sua conta é necessária para criar apresentações a partir de modelos."
+          actionLabel="Entrar"
+          onAction={() => navigate('/login')}
+        />
+      </div>
+    );
   }
 
   const hasActiveFilters = Boolean(
@@ -894,7 +1102,7 @@ export default function Templates() {
           type="button"
           variant="outline"
           onClick={handleRefresh}
-          disabled={refreshing}
+          disabled={refreshing || Boolean(usingTemplateId)}
           className="w-full sm:w-auto"
         >
           <RefreshCw
@@ -1063,6 +1271,7 @@ export default function Templates() {
                 onPreview={openPreview}
                 onUse={handleUseTemplate}
                 isUsing={usingTemplateId === template.id}
+                isLocked={isTemplateLocked(template)}
               />
             );
           })}
@@ -1083,6 +1292,7 @@ export default function Templates() {
                 onPreview={openPreview}
                 onUse={handleUseTemplate}
                 isUsing={usingTemplateId === template.id}
+                isLocked={isTemplateLocked(template)}
               />
             );
           })}
