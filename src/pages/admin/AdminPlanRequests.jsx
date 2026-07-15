@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -73,6 +73,34 @@ function formatCurrency(value) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value) || 0);
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) map.set(row.id, row);
+  }
+  return [...map.values()];
+}
+
+function toDateInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().split('T')[0];
+}
+
+function buildExpirationDate(plan, activationDate) {
+  if (!plan || plan.billing_period === 'lifetime') return '';
+
+  const durationDays = Number(plan.duration_days) || 0;
+  if (durationDays <= 0) return '';
+
+  const base = activationDate ? new Date(`${activationDate}T12:00:00`) : new Date();
+  if (Number.isNaN(base.getTime())) return '';
+
+  base.setDate(base.getDate() + durationDays);
+  return base.toISOString().split('T')[0];
+}
+
 function LoadingState() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
@@ -120,6 +148,7 @@ export default function AdminPlanRequests() {
     rejection_reason: '',
   });
   const [saving, setSaving] = useState(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!isAdmin) {
@@ -136,9 +165,9 @@ export default function AdminPlanRequests() {
         base44.entities.UserProfile.filter({}, '-created_date', 1000),
       ]);
 
-      setRequests(Array.isArray(reqRows) ? reqRows : []);
-      setPlans(Array.isArray(planRows) ? planRows : []);
-      setProfiles(Array.isArray(profileRows) ? profileRows : []);
+      setRequests(uniqueById(reqRows));
+      setPlans(uniqueById(planRows));
+      setProfiles(uniqueById(profileRows));
     } catch {
       toast({ title: 'Falha ao carregar', variant: 'destructive' });
     } finally {
@@ -173,66 +202,188 @@ export default function AdminPlanRequests() {
   }, [requests, search, statusFilter, planFilter, profileMap, planMap]);
 
   const openAnalyze = (req, action) => {
-    setAnalyzing(req);
+    if (!req?.id || saving || actionLockRef.current) return;
+    if (!['pending', 'under_review'].includes(req.status)) {
+      toast({
+        title: 'Solicitação já processada',
+        description: 'Atualize a página para conferir o status mais recente.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const today = new Date().toISOString().split('T')[0];
     const plan = planMap[req.plan_id];
-    const durationDays = plan?.duration_days || 30;
-    const expiration = new Date();
-    expiration.setDate(expiration.getDate() + durationDays);
 
+    setAnalyzing(req);
     setActionForm({
       action,
       activation_date: today,
-      expiration_date: action === 'approve' ? expiration.toISOString().split('T')[0] : '',
-      admin_note: '',
+      expiration_date: action === 'approve' ? buildExpirationDate(plan, today) : '',
+      admin_note: req.admin_note || '',
       rejection_reason: '',
     });
   };
 
   const handleAction = async () => {
-    if (!analyzing?.id || saving) return;
+    if (!analyzing?.id || saving || actionLockRef.current) return;
+
+    const currentRequest = requests.find((request) => request.id === analyzing.id);
+    if (!currentRequest || !['pending', 'under_review'].includes(currentRequest.status)) {
+      toast({
+        title: 'Solicitação já processada',
+        description: 'Atualize a página antes de tentar novamente.',
+        variant: 'destructive',
+      });
+      setAnalyzing(null);
+      return;
+    }
+
+    const plan = planMap[analyzing.plan_id];
+
+    if (actionForm.action === 'approve') {
+      if (!plan?.id || plan.active === false) {
+        toast({
+          title: 'Plano inválido ou inativo',
+          description: 'Escolha ou reative o plano antes de aprovar.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (!actionForm.activation_date) {
+        toast({ title: 'Informe a data de ativação', variant: 'destructive' });
+        return;
+      }
+
+      const permanent =
+        analyzing.request_type === 'permanent_unlock'
+        || plan.billing_period === 'lifetime';
+
+      if (!permanent && Number(plan.duration_days) > 0 && !actionForm.expiration_date) {
+        toast({ title: 'Informe a data de vencimento', variant: 'destructive' });
+        return;
+      }
+
+      if (
+        actionForm.expiration_date
+        && actionForm.expiration_date < actionForm.activation_date
+      ) {
+        toast({
+          title: 'Data de vencimento inválida',
+          description: 'O vencimento não pode ser anterior à ativação.',
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
 
     if (actionForm.action === 'reject' && !actionForm.rejection_reason.trim()) {
       toast({ title: 'Informe o motivo da rejeição', variant: 'destructive' });
       return;
     }
 
+    actionLockRef.current = true;
     setSaving(true);
 
     try {
       const now = new Date().toISOString();
 
       if (actionForm.action === 'approve') {
-        await base44.entities.PlanRequest.update(analyzing.id, {
-          status: 'approved',
-          analyzed_at: now,
-          analyzed_by_user_id: user?.id || '',
-          activation_date: actionForm.activation_date || now,
-          expiration_date: actionForm.expiration_date || '',
-          admin_note: actionForm.admin_note.trim(),
-          rejection_reason: '',
-        });
+        const isPermanent =
+          analyzing.request_type === 'permanent_unlock'
+          || plan.billing_period === 'lifetime';
 
-        const profile = profileMap[analyzing.user_id];
-        const isPermanent = analyzing.request_type === 'permanent_unlock';
+        const activationDate = actionForm.activation_date;
+        const expirationDate = isPermanent ? '' : actionForm.expiration_date;
+        const existingProfile = profileMap[analyzing.user_id];
 
-        if (profile?.id) {
-          await base44.entities.UserProfile.update(profile.id, {
-            plan_id: analyzing.plan_id,
-            plan_start_date: actionForm.activation_date || now,
-            plan_expires_at: actionForm.expiration_date || '',
-            plan_status: isPermanent ? 'permanent' : 'active',
-            permanent_ad_free: isPermanent,
-            plan_last_changed_at: now,
-            plan_changed_by_user_id: user?.id || '',
-            plan_note: actionForm.admin_note.trim(),
-            plan_activation_reason: 'Manual approval by admin',
-            shows_ads: false,
-            plan_request_status: 'approved',
+        const profilePayload = {
+          plan_id: analyzing.plan_id,
+          plan_start_date: activationDate,
+          plan_expires_at: expirationDate,
+          plan_status: isPermanent ? 'permanent' : 'active',
+          permanent_ad_free: isPermanent || plan.shows_ads === false,
+          plan_last_changed_at: now,
+          plan_changed_by_user_id: user?.id || '',
+          plan_note: actionForm.admin_note.trim(),
+          plan_activation_reason: 'manual_admin_approval',
+          shows_ads: isPermanent ? false : plan.shows_ads !== false,
+          plan_request_status: 'approved',
+          active: true,
+        };
+
+        let savedProfile;
+
+        if (existingProfile?.id) {
+          savedProfile = await base44.entities.UserProfile.update(
+            existingProfile.id,
+            profilePayload,
+          );
+        } else {
+          savedProfile = await base44.entities.UserProfile.create({
+            user_id: analyzing.user_id,
+            name: analyzing.payer_name?.trim() || 'Usuário',
+            role: 'user',
+            onboarding_completed: false,
+            ...profilePayload,
           });
         }
 
-        toast({ title: 'Solicitação aprovada', description: 'O plano do usuário foi atualizado.' });
+        try {
+          await base44.entities.PlanRequest.update(analyzing.id, {
+            status: 'approved',
+            analyzed_at: now,
+            analyzed_by_user_id: user?.id || '',
+            activation_date: activationDate,
+            expiration_date: expirationDate,
+            admin_note: actionForm.admin_note.trim(),
+            rejection_reason: '',
+          });
+        } catch (requestError) {
+          if (savedProfile?.id) {
+            const rollbackPayload = existingProfile?.id
+              ? {
+                  plan_id: existingProfile.plan_id || '',
+                  plan_start_date: existingProfile.plan_start_date || '',
+                  plan_expires_at: existingProfile.plan_expires_at || '',
+                  plan_status: existingProfile.plan_status || 'none',
+                  permanent_ad_free: !!existingProfile.permanent_ad_free,
+                  plan_last_changed_at: existingProfile.plan_last_changed_at || '',
+                  plan_changed_by_user_id: existingProfile.plan_changed_by_user_id || '',
+                  plan_note: existingProfile.plan_note || '',
+                  plan_activation_reason: existingProfile.plan_activation_reason || '',
+                  shows_ads: existingProfile.shows_ads !== false,
+                  plan_request_status: existingProfile.plan_request_status || '',
+                  active: existingProfile.active !== false,
+                }
+              : {
+                  plan_id: '',
+                  plan_start_date: '',
+                  plan_expires_at: '',
+                  plan_status: 'none',
+                  permanent_ad_free: false,
+                  plan_last_changed_at: now,
+                  plan_changed_by_user_id: user?.id || '',
+                  plan_note: 'Ativação revertida após falha ao concluir a solicitação.',
+                  plan_activation_reason: 'approval_rollback',
+                  shows_ads: true,
+                  plan_request_status: 'pending',
+                };
+
+            try {
+              await base44.entities.UserProfile.update(savedProfile.id, rollbackPayload);
+            } catch {
+              // A tela será recarregada e o administrador receberá o erro principal.
+            }
+          }
+          throw requestError;
+        }
+
+        toast({
+          title: 'Solicitação aprovada',
+          description: 'O plano do usuário foi ativado com sucesso.',
+        });
       } else if (actionForm.action === 'reject') {
         await base44.entities.PlanRequest.update(analyzing.id, {
           status: 'rejected',
@@ -240,6 +391,8 @@ export default function AdminPlanRequests() {
           analyzed_by_user_id: user?.id || '',
           rejection_reason: actionForm.rejection_reason.trim(),
           admin_note: actionForm.admin_note.trim(),
+          activation_date: '',
+          expiration_date: '',
         });
 
         const profile = profileMap[analyzing.user_id];
@@ -257,14 +410,29 @@ export default function AdminPlanRequests() {
           analyzed_by_user_id: user?.id || '',
           admin_note: actionForm.admin_note.trim(),
         });
-        toast({ title: 'Marcada como em análise' });
+
+        const profile = profileMap[analyzing.user_id];
+        if (profile?.id) {
+          await base44.entities.UserProfile.update(profile.id, {
+            plan_request_status: 'under_review',
+          });
+        }
+
+        toast({ title: 'Solicitação marcada como em análise' });
       }
 
       setAnalyzing(null);
-      loadData({ silent: true });
-    } catch {
-      toast({ title: 'Não foi possível processar', variant: 'destructive' });
+      await loadData({ silent: true });
+    } catch (error) {
+      console.error('Erro ao processar solicitação de plano:', error);
+      toast({
+        title: 'Não foi possível processar',
+        description: 'Nenhuma aprovação deve ser considerada concluída até a lista ser atualizada.',
+        variant: 'destructive',
+      });
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setSaving(false);
     }
   };
@@ -425,11 +593,44 @@ export default function AdminPlanRequests() {
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label>Data de ativação</Label>
-                <Input type="date" value={actionForm.activation_date} onChange={(e) => setActionForm((f) => ({ ...f, activation_date: e.target.value }))} />
+                <Input
+                  type="date"
+                  value={actionForm.activation_date}
+                  onChange={(e) => {
+                    const activationDate = e.target.value;
+                    const selectedPlan = planMap[analyzing?.plan_id];
+                    setActionForm((current) => ({
+                      ...current,
+                      activation_date: activationDate,
+                      expiration_date:
+                        selectedPlan?.billing_period === 'lifetime'
+                          ? ''
+                          : buildExpirationDate(selectedPlan, activationDate),
+                    }));
+                  }}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Data de vencimento</Label>
-                <Input type="date" value={actionForm.expiration_date} onChange={(e) => setActionForm((f) => ({ ...f, expiration_date: e.target.value }))} />
+                <Input
+                  type="date"
+                  value={actionForm.expiration_date}
+                  min={actionForm.activation_date || undefined}
+                  disabled={
+                    analyzing?.request_type === 'permanent_unlock'
+                    || planMap[analyzing?.plan_id]?.billing_period === 'lifetime'
+                  }
+                  onChange={(e) => setActionForm((current) => ({
+                    ...current,
+                    expiration_date: e.target.value,
+                  }))}
+                />
+                {(analyzing?.request_type === 'permanent_unlock'
+                  || planMap[analyzing?.plan_id]?.billing_period === 'lifetime') && (
+                  <p className="text-xs text-muted-foreground">
+                    Este plano não possui vencimento.
+                  </p>
+                )}
               </div>
             </div>
           )}
