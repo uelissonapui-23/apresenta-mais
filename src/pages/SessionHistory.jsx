@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
@@ -49,6 +50,48 @@ function asNumber(value, fallback = 0) {
 
 function clampPercentage(value) {
   return Math.min(100, Math.max(0, Math.round(asNumber(value))));
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.started_at
+    || record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortSessionsNewestFirst(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const timestampDifference = (
+      getRecordTimestamp(right)
+      - getRecordTimestamp(left)
+    );
+
+    if (timestampDifference !== 0) {
+      return timestampDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
 }
 
 function formatTime(totalSeconds) {
@@ -479,9 +522,20 @@ export default function SessionHistory() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
+  const detailsLockRef = useRef(new Set());
 
   const loadPage = useCallback(async ({ silent = false } = {}) => {
-    if (!id || !user?.id) return;
+    if (!id || !user?.id) {
+      if (!id) {
+        setError('Identificador da apresentação não encontrado.');
+      } else if (!user?.id) {
+        setError('Entre na sua conta para acessar este histórico.');
+      }
+
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
     if (!silent) setLoading(true);
     setError('');
@@ -506,9 +560,20 @@ export default function SessionHistory() {
         throw new Error('Apresentação não encontrada ou sem permissão.');
       }
 
+      const normalizedSessions = sortSessionsNewestFirst(
+        sessionRows,
+      ).filter((session) => (
+        session.presentation_id === id
+        && session.user_id === user.id
+      ));
+
+      const normalizedBlocks = uniqueById(blockRows).filter(
+        (block) => block.presentation_id === id,
+      );
+
       setPresentation(presentationRow);
-      setSessions(Array.isArray(sessionRows) ? sessionRows : []);
-      setBlocks(Array.isArray(blockRows) ? blockRows : []);
+      setSessions(normalizedSessions);
+      setBlocks(normalizedBlocks);
       setDetailsBySession({});
       setExpandedSessionId(null);
     } catch (loadError) {
@@ -526,6 +591,9 @@ export default function SessionHistory() {
   useEffect(() => {
     if (!userLoading && user?.id) {
       loadPage();
+    } else if (!userLoading && !user?.id) {
+      setLoading(false);
+      setError('Entre na sua conta para acessar este histórico.');
     }
   }, [loadPage, user?.id, userLoading]);
 
@@ -559,14 +627,43 @@ export default function SessionHistory() {
   }, [sessions]);
 
   const handleToggleSession = async (sessionId) => {
+    if (!sessionId) {
+      return;
+    }
+
     if (expandedSessionId === sessionId) {
       setExpandedSessionId(null);
       return;
     }
 
+    const session = sessions.find((item) => item.id === sessionId);
+
+    if (
+      !session
+      || session.presentation_id !== id
+      || session.user_id !== user?.id
+    ) {
+      toast({
+        title: 'Sessão inválida',
+        description:
+          'Atualize o histórico antes de tentar abrir os detalhes novamente.',
+        variant: 'destructive',
+      });
+
+      return;
+    }
+
     setExpandedSessionId(sessionId);
 
-    if (detailsBySession[sessionId]) return;
+    if (detailsBySession[sessionId]) {
+      return;
+    }
+
+    if (detailsLockRef.current.has(sessionId)) {
+      return;
+    }
+
+    detailsLockRef.current.add(sessionId);
 
     setLoadingDetails((current) => ({
       ...current,
@@ -575,23 +672,41 @@ export default function SessionHistory() {
 
     try {
       const rows = await base44.entities.SessionBlockProgress.filter(
-        { session_id: sessionId },
+        {
+          session_id: sessionId,
+        },
         'order_used',
       );
 
+      const normalizedDetails = uniqueById(rows)
+        .filter((item) => item.session_id === sessionId)
+        .sort((left, right) => (
+          asNumber(left.order_used)
+          - asNumber(right.order_used)
+          || String(left.id).localeCompare(String(right.id))
+        ));
+
       setDetailsBySession((current) => ({
         ...current,
-        [sessionId]: Array.isArray(rows) ? rows : [],
+        [sessionId]: normalizedDetails,
       }));
     } catch (detailsError) {
-      console.error('Erro ao carregar detalhes da sessão:', detailsError);
+      console.error(
+        'Erro ao carregar detalhes da sessão:',
+        detailsError,
+      );
+
       toast({
         title: 'Não foi possível abrir os detalhes',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
+
       setExpandedSessionId(null);
     } finally {
+      detailsLockRef.current.delete(sessionId);
+
       setLoadingDetails((current) => ({
         ...current,
         [sessionId]: false,
@@ -600,6 +715,21 @@ export default function SessionHistory() {
   };
 
   const handleContinue = (session) => {
+    if (
+      !session?.id
+      || session.presentation_id !== id
+      || session.user_id !== user?.id
+      || !['in_progress', 'paused'].includes(session.status)
+    ) {
+      toast({
+        title: 'Esta sessão não pode ser continuada',
+        description:
+          'Inicie uma nova sessão ou atualize o histórico.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const route = session.session_type === 'presentation'
       ? `/present/${id}`
       : `/rehearsal/${id}`;
@@ -675,7 +805,10 @@ export default function SessionHistory() {
             type="button"
             variant="outline"
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || Object.values(loadingDetails).some(Boolean)
+            }
           >
             <RefreshCw
               className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
