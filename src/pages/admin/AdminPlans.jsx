@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -10,6 +10,7 @@ import {
   FileDown,
   HardDrive,
   Infinity as InfinityIcon,
+  Megaphone,
   Loader2,
   Pencil,
   Plus,
@@ -60,6 +61,9 @@ const DEFAULT_FORM = {
   description: '',
   price: 0,
   billing_period: 'free',
+  duration_days: 0,
+  shows_ads: true,
+  order_index: 0,
   max_presentations: -1,
   max_storage: -1,
   can_export_pdf: false,
@@ -72,6 +76,20 @@ const DEFAULT_FORM = {
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(value) {
+  const map = new Map();
+  for (const item of Array.isArray(value) ? value : []) {
+    if (item?.id) map.set(item.id, item);
+  }
+  return [...map.values()];
+}
+
+function getRecommendedDuration(period) {
+  if (period === 'monthly') return 30;
+  if (period === 'yearly') return 365;
+  return 0;
 }
 
 function formatCurrency(value) {
@@ -231,6 +249,11 @@ function PlanCard({ plan, userCount, onEdit, onToggleActive, onDelete, busy }) {
           <p className="mt-1 text-xs text-muted-foreground">
             Cobrança: {getBillingLabel(plan.billing_period)}
           </p>
+          {plan.billing_period !== 'free' && plan.billing_period !== 'lifetime' && (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Duração: {Math.max(0, normalizeNumber(plan.duration_days, 0))} dias
+            </p>
+          )}
         </div>
 
         <div className="grid gap-2 rounded-xl border bg-muted/20 p-3 sm:grid-cols-2">
@@ -258,6 +281,9 @@ function PlanCard({ plan, userCount, onEdit, onToggleActive, onDelete, busy }) {
           </FeatureRow>
           <FeatureRow enabled={!!plan.can_sync_devices} icon={Cloud}>
             Sincronização entre dispositivos
+          </FeatureRow>
+          <FeatureRow enabled={plan.shows_ads === false} icon={Megaphone}>
+            Uso sem anúncios
           </FeatureRow>
         </div>
 
@@ -337,7 +363,7 @@ function ToggleField({ checked, onChange, icon: Icon, title, description }) {
 }
 
 export default function AdminPlans() {
-  const { isAdmin, loading: userLoading } = useCurrentUser();
+  const { user, isAdmin, loading: userLoading } = useCurrentUser();
   const { toast } = useToast();
 
   const [plans, setPlans] = useState([]);
@@ -352,6 +378,8 @@ export default function AdminPlans() {
   const [editingPlan, setEditingPlan] = useState(null);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
 
   const [deleteTarget, setDeleteTarget] = useState(null);
 
@@ -370,8 +398,8 @@ export default function AdminPlans() {
         base44.entities.UserProfile.list('-created_date', 1000),
       ]);
 
-      setPlans(Array.isArray(planRows) ? planRows : []);
-      setProfiles(Array.isArray(profileRows) ? profileRows : []);
+      setPlans(uniqueById(planRows));
+      setProfiles(uniqueById(profileRows));
     } catch (error) {
       console.error('Erro ao carregar planos:', error);
       toast({
@@ -443,6 +471,9 @@ export default function AdminPlans() {
       description: plan.description || '',
       price: normalizeNumber(plan.price, 0),
       billing_period: plan.billing_period || 'free',
+      duration_days: Math.max(0, Math.trunc(normalizeNumber(plan.duration_days, 0))),
+      shows_ads: plan.shows_ads !== false,
+      order_index: Math.trunc(normalizeNumber(plan.order_index, 0)),
       max_presentations: normalizeNumber(plan.max_presentations, -1),
       max_storage: normalizeNumber(plan.max_storage, -1),
       can_export_pdf: !!plan.can_export_pdf,
@@ -475,12 +506,34 @@ export default function AdminPlans() {
       return false;
     }
 
+    if (
+      !['free', 'lifetime'].includes(form.billing_period)
+      && Math.trunc(normalizeNumber(form.duration_days, 0)) <= 0
+    ) {
+      toast({
+        title: 'Informe a duração do plano',
+        description: 'Planos mensais e anuais precisam ter duração maior que zero.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+
+    if (Math.trunc(normalizeNumber(form.order_index, 0)) < 0) {
+      toast({
+        title: 'Ordem inválida',
+        description: 'A ordem de exibição não pode ser negativa.',
+        variant: 'destructive',
+      });
+      return false;
+    }
+
     return true;
   };
 
   const handleSave = async () => {
-    if (!validateForm() || saving) return;
+    if (!validateForm() || saving || saveLockRef.current) return;
 
+    saveLockRef.current = true;
     setSaving(true);
 
     const payload = {
@@ -488,6 +541,11 @@ export default function AdminPlans() {
       description: form.description.trim(),
       price: form.billing_period === 'free' ? 0 : Math.max(0, normalizeNumber(form.price, 0)),
       billing_period: form.billing_period,
+      duration_days: ['free', 'lifetime'].includes(form.billing_period)
+        ? 0
+        : Math.max(1, Math.trunc(normalizeNumber(form.duration_days, 0))),
+      shows_ads: !!form.shows_ads,
+      order_index: Math.max(0, Math.trunc(normalizeNumber(form.order_index, 0))),
       max_presentations: Math.trunc(normalizeNumber(form.max_presentations, -1)),
       max_storage: Math.trunc(normalizeNumber(form.max_storage, -1)),
       can_export_pdf: !!form.can_export_pdf,
@@ -495,6 +553,7 @@ export default function AdminPlans() {
       can_use_premium_templates: !!form.can_use_premium_templates,
       can_sync_devices: !!form.can_sync_devices,
       active: !!form.active,
+      updated_by_user_id: user?.id || '',
     };
 
     try {
@@ -522,13 +581,15 @@ export default function AdminPlans() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (plan) => {
-    if (busyId) return;
+    if (!plan?.id || busyId || actionLockRef.current) return;
 
+    actionLockRef.current = true;
     const nextActive = !plan.active;
     setBusyId(plan.id);
 
@@ -549,6 +610,7 @@ export default function AdminPlans() {
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -569,8 +631,9 @@ export default function AdminPlans() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget?.id || busyId) return;
+    if (!deleteTarget?.id || busyId || actionLockRef.current) return;
 
+    actionLockRef.current = true;
     setBusyId(deleteTarget.id);
 
     try {
@@ -586,6 +649,7 @@ export default function AdminPlans() {
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -620,7 +684,7 @@ export default function AdminPlans() {
           <Button
             variant="outline"
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={refreshing || saving || !!busyId}
             className="flex-1 sm:flex-none"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -720,8 +784,13 @@ export default function AdminPlans() {
                   value={form.billing_period}
                   onChange={(event) => {
                     const value = event.target.value;
-                    updateForm('billing_period', value);
-                    if (value === 'free') updateForm('price', 0);
+                    setForm((current) => ({
+                      ...current,
+                      billing_period: value,
+                      price: value === 'free' ? 0 : current.price,
+                      duration_days: getRecommendedDuration(value),
+                      shows_ads: value === 'free' ? true : current.shows_ads,
+                    }));
                   }}
                   className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 >
@@ -744,7 +813,7 @@ export default function AdminPlans() {
               />
             </FormField>
 
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <FormField
                 label="Preço"
                 description={form.billing_period === 'free' ? 'Planos gratuitos sempre usam valor zero.' : 'Valor cobrado em reais.'}
@@ -756,6 +825,43 @@ export default function AdminPlans() {
                   value={form.price}
                   disabled={form.billing_period === 'free'}
                   onChange={(event) => updateForm('price', normalizeNumber(event.target.value, 0))}
+                />
+              </FormField>
+
+              <FormField
+                label="Duração em dias"
+                description={
+                  ['free', 'lifetime'].includes(form.billing_period)
+                    ? 'Não se aplica a este período.'
+                    : 'Usada para calcular o vencimento após a aprovação.'
+                }
+              >
+                <Input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={form.duration_days}
+                  disabled={['free', 'lifetime'].includes(form.billing_period)}
+                  onChange={(event) => updateForm(
+                    'duration_days',
+                    Math.trunc(normalizeNumber(event.target.value, 0)),
+                  )}
+                />
+              </FormField>
+
+              <FormField
+                label="Ordem de exibição"
+                description="Menores valores aparecem primeiro."
+              >
+                <Input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={form.order_index}
+                  onChange={(event) => updateForm(
+                    'order_index',
+                    Math.trunc(normalizeNumber(event.target.value, 0)),
+                  )}
                 />
               </FormField>
 
@@ -818,6 +924,24 @@ export default function AdminPlans() {
                   description="Libera sincronização entre diferentes dispositivos."
                 />
               </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-xl border p-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted">
+                  <Megaphone className="h-4 w-4 text-foreground/70" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Exibir anúncios</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Quando desativado, usuários com este plano não verão anúncios.
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={form.shows_ads}
+                onCheckedChange={(value) => updateForm('shows_ads', value)}
+              />
             </div>
 
             <div className="flex items-center justify-between gap-4 rounded-xl border p-4">
