@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -54,6 +54,41 @@ const POSITIONS = [
   { value: 'inline', label: 'Embutido' },
 ];
 
+const DEFAULT_CONFIG = {
+  ads_enabled: false,
+  provider: 'none',
+  environment: 'test',
+  banner_enabled: true,
+  interstitial_enabled: false,
+  rewarded_enabled: false,
+  test_mode: true,
+  default_banner_code: '',
+  default_interstitial_code: '',
+  default_rewarded_code: '',
+  frequency_limit: 3,
+  minimum_interval_minutes: 5,
+  admin_preview_enabled: true,
+  active: true,
+};
+
+function uniqueById(rows) {
+  const map = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) map.set(row.id, row);
+  }
+  return [...map.values()];
+}
+
+function normalizeRoutes(value) {
+  return [...new Set(
+    String(value || '')
+      .split(/\r?\n|,/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => (item.startsWith('/') ? item : `/${item}`)),
+  )].join('\n');
+}
+
 function LoadingState() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
@@ -89,6 +124,7 @@ export default function AdminAds() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
+  const configSaveLockRef = useRef(false);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingPlacement, setEditingPlacement] = useState(null);
@@ -110,6 +146,8 @@ export default function AdminAds() {
     active: true,
   });
   const [savingPlacement, setSavingPlacement] = useState(false);
+  const placementSaveLockRef = useRef(false);
+  const deleteLockRef = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
@@ -126,8 +164,9 @@ export default function AdminAds() {
         base44.entities.AdPlacement.filter({}, 'order_index', 100),
       ]);
 
-      setConfig(Array.isArray(configRows) && configRows.length > 0 ? configRows[0] : null);
-      setPlacements(Array.isArray(placementRows) ? placementRows : []);
+      const configs = uniqueById(configRows);
+      setConfig(configs.length > 0 ? { ...DEFAULT_CONFIG, ...configs[0] } : { ...DEFAULT_CONFIG });
+      setPlacements(uniqueById(placementRows));
     } catch {
       toast({ title: 'Falha ao carregar', variant: 'destructive' });
     } finally {
@@ -145,40 +184,88 @@ export default function AdminAds() {
   };
 
   const handleSaveConfig = async () => {
-    if (!config || savingConfig) return;
+    if (!config || savingConfig || configSaveLockRef.current) return;
 
+    const frequencyLimit = Number(config.frequency_limit);
+    const minimumInterval = Number(config.minimum_interval_minutes);
+    const provider = String(config.provider || 'none').trim() || 'none';
+
+    if (!Number.isFinite(frequencyLimit) || frequencyLimit < 0) {
+      toast({
+        title: 'Limite de frequência inválido',
+        description: 'Use um número igual ou maior que zero.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!Number.isFinite(minimumInterval) || minimumInterval < 0) {
+      toast({
+        title: 'Intervalo inválido',
+        description: 'Use um número de minutos igual ou maior que zero.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (
+      config.ads_enabled
+      && config.test_mode === false
+      && provider.toLowerCase() === 'none'
+    ) {
+      toast({
+        title: 'Informe o provedor',
+        description: 'Para ativar anúncios reais, selecione um provedor válido.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    configSaveLockRef.current = true;
     setSavingConfig(true);
 
     try {
       const payload = {
         ads_enabled: !!config.ads_enabled,
-        provider: config.provider || 'none',
+        provider,
         environment: config.environment || 'test',
         banner_enabled: !!config.banner_enabled,
         interstitial_enabled: !!config.interstitial_enabled,
         rewarded_enabled: !!config.rewarded_enabled,
         test_mode: config.test_mode !== false,
-        default_banner_code: config.default_banner_code || '',
-        default_interstitial_code: config.default_interstitial_code || '',
-        default_rewarded_code: config.default_rewarded_code || '',
-        frequency_limit: Number(config.frequency_limit) || 3,
-        minimum_interval_minutes: Number(config.minimum_interval_minutes) || 5,
-        admin_preview_enabled: !!config.admin_preview_enabled,
+        default_banner_code: String(config.default_banner_code || '').trim(),
+        default_interstitial_code: String(config.default_interstitial_code || '').trim(),
+        default_rewarded_code: String(config.default_rewarded_code || '').trim(),
+        frequency_limit: frequencyLimit,
+        minimum_interval_minutes: minimumInterval,
+        admin_preview_enabled: config.admin_preview_enabled !== false,
         active: true,
         updated_by_user_id: user?.id || '',
       };
 
+      let saved;
       if (config.id) {
-        await base44.entities.AdConfiguration.update(config.id, payload);
+        saved = await base44.entities.AdConfiguration.update(config.id, payload);
       } else {
-        const created = await base44.entities.AdConfiguration.create(payload);
-        setConfig(created);
+        saved = await base44.entities.AdConfiguration.create(payload);
       }
 
+      setConfig({
+        ...DEFAULT_CONFIG,
+        ...payload,
+        ...(saved || {}),
+      });
+
       toast({ title: 'Configuração salva' });
-    } catch {
-      toast({ title: 'Não foi possível salvar', variant: 'destructive' });
+    } catch (error) {
+      console.error('Erro ao salvar configuração de anúncios:', error);
+      toast({
+        title: 'Não foi possível salvar',
+        description: 'Revise os dados e tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
+      configSaveLockRef.current = false;
       setSavingConfig(false);
     }
   };
@@ -228,17 +315,58 @@ export default function AdminAds() {
   };
 
   const handleSavePlacement = async () => {
-    if (!form.name.trim() || !form.code.trim()) {
+    if (savingPlacement || placementSaveLockRef.current) return;
+
+    const name = form.name.trim();
+    const code = form.code.trim();
+
+    if (!name || !code) {
       toast({ title: 'Nome e código são obrigatórios', variant: 'destructive' });
       return;
     }
 
+    const duplicateCode = placements.some(
+      (placement) =>
+        placement.id !== editingPlacement?.id
+        && String(placement.code || '').trim().toLowerCase() === code.toLowerCase(),
+    );
+
+    if (duplicateCode) {
+      toast({
+        title: 'Código já utilizado',
+        description: 'Cada posição precisa ter um código exclusivo.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (
+      !form.show_on_mobile
+      && !form.show_on_tablet
+      && !form.show_on_desktop
+    ) {
+      toast({
+        title: 'Selecione ao menos um dispositivo',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!form.show_in_portrait && !form.show_in_landscape) {
+      toast({
+        title: 'Selecione ao menos uma orientação',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    placementSaveLockRef.current = true;
     setSavingPlacement(true);
 
     try {
       const payload = {
-        name: form.name.trim(),
-        code: form.code.trim(),
+        name,
+        code,
         description: form.description.trim(),
         page_key: form.page_key || 'all',
         position: form.position,
@@ -249,7 +377,7 @@ export default function AdminAds() {
         show_on_desktop: !!form.show_on_desktop,
         show_in_portrait: !!form.show_in_portrait,
         show_in_landscape: !!form.show_in_landscape,
-        excluded_routes_json: form.excluded_routes_json.trim(),
+        excluded_routes_json: normalizeRoutes(form.excluded_routes_json),
         order_index: Number(form.order_index) || 0,
         active: !!form.active,
       };
@@ -267,12 +395,15 @@ export default function AdminAds() {
     } catch {
       toast({ title: 'Não foi possível salvar', variant: 'destructive' });
     } finally {
+      placementSaveLockRef.current = false;
       setSavingPlacement(false);
     }
   };
 
   const handleDeletePlacement = async () => {
-    if (!deleteTarget?.id) return;
+    if (!deleteTarget?.id || deleteLockRef.current) return;
+
+    deleteLockRef.current = true;
 
     try {
       await base44.entities.AdPlacement.delete(deleteTarget.id);
@@ -281,6 +412,8 @@ export default function AdminAds() {
       loadData({ silent: true });
     } catch {
       toast({ title: 'Não foi possível excluir', variant: 'destructive' });
+    } finally {
+      deleteLockRef.current = false;
     }
   };
 
@@ -303,7 +436,14 @@ export default function AdminAds() {
           </p>
         </div>
 
-        <Button variant="outline" onClick={() => { setRefreshing(true); loadData({ silent: true }); }} disabled={refreshing}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setRefreshing(true);
+            loadData({ silent: true });
+          }}
+          disabled={refreshing || savingConfig || savingPlacement}
+        >
           <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
           Atualizar
         </Button>
@@ -362,7 +502,7 @@ export default function AdminAds() {
             </div>
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-2">
               <Label>Identificador do banner</Label>
               <Input
@@ -377,6 +517,14 @@ export default function AdminAds() {
                 value={config?.default_interstitial_code || ''}
                 onChange={(e) => updateConfig('default_interstitial_code', e.target.value)}
                 placeholder="ID do bloco de anúncio"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Identificador do recompensado</Label>
+              <Input
+                value={config?.default_rewarded_code || ''}
+                onChange={(e) => updateConfig('default_rewarded_code', e.target.value)}
+                placeholder="ID do anúncio recompensado"
               />
             </div>
           </div>
@@ -402,6 +550,19 @@ export default function AdminAds() {
             </div>
           </div>
 
+          <div className="flex items-center justify-between gap-4 rounded-xl border p-4">
+            <div>
+              <p className="font-medium">Prévia para administradores</p>
+              <p className="text-xs text-muted-foreground">
+                Mostra a área de prévia quando o modo de teste estiver ativo.
+              </p>
+            </div>
+            <Switch
+              checked={config?.admin_preview_enabled !== false}
+              onCheckedChange={(value) => updateConfig('admin_preview_enabled', value)}
+            />
+          </div>
+
           <div className="flex flex-wrap gap-3">
             <div className="flex items-center gap-2">
               <Switch checked={!!config?.banner_enabled} onCheckedChange={(v) => updateConfig('banner_enabled', v)} />
@@ -417,7 +578,7 @@ export default function AdminAds() {
             </div>
           </div>
 
-          <Button onClick={handleSaveConfig} disabled={savingConfig}>
+          <Button onClick={handleSaveConfig} disabled={savingConfig || !config}>
             {savingConfig && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Salvar configuração
           </Button>
@@ -579,8 +740,43 @@ export default function AdminAds() {
               ))}
             </div>
 
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex items-center gap-2 rounded-lg border p-2">
+                <Switch
+                  checked={form.show_in_portrait}
+                  onCheckedChange={(value) => setForm((current) => ({
+                    ...current,
+                    show_in_portrait: value,
+                  }))}
+                />
+                <span className="text-xs">Retrato</span>
+              </div>
+
+              <div className="flex items-center gap-2 rounded-lg border p-2">
+                <Switch
+                  checked={form.show_in_landscape}
+                  onCheckedChange={(value) => setForm((current) => ({
+                    ...current,
+                    show_in_landscape: value,
+                  }))}
+                />
+                <span className="text-xs">Paisagem</span>
+              </div>
+            </div>
+
             <div className="flex items-center justify-between gap-4 rounded-xl border p-3">
-              <span className="text-sm">Ativo</span>
+              <span className="text-sm">Habilitada</span>
+              <Switch
+                checked={form.enabled}
+                onCheckedChange={(value) => setForm((current) => ({
+                  ...current,
+                  enabled: value,
+                }))}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-xl border p-3">
+              <span className="text-sm">Registro ativo</span>
               <Switch checked={form.active} onCheckedChange={(v) => setForm((f) => ({ ...f, active: v }))} />
             </div>
           </div>
