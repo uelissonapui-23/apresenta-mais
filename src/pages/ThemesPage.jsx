@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Check,
   Eye,
   Filter,
   Layers3,
+  Lock,
   MonitorPlay,
   Palette,
   RefreshCw,
@@ -66,6 +67,95 @@ function normalizeColor(value, fallback) {
 function safeFont(fontName, fallback = 'Inter') {
   if (typeof fontName !== 'string' || !fontName.trim()) return fallback;
   return fontName.trim();
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
+}
+
+function normalizeDate(value, { endOfDay = false } = {}) {
+  if (!value) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+
+  const date = new Date(
+    dateOnly
+      ? `${raw}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`
+      : raw,
+  );
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function isProfilePlanActive(profile) {
+  if (!profile?.plan_id) {
+    return false;
+  }
+
+  const status = String(profile.plan_status || 'none')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'permanent') {
+    return true;
+  }
+
+  if (status !== 'active') {
+    return false;
+  }
+
+  const expiration = normalizeDate(
+    profile.plan_expires_at,
+    { endOfDay: true },
+  );
+
+  return !expiration || expiration.getTime() >= Date.now();
 }
 
 function ThemePreview({ theme, compact = false }) {
@@ -196,12 +286,18 @@ function EmptyThemes({ hasFilters, onClear }) {
 }
 
 export default function ThemesPage() {
-  const { user, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    profile,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
   const { toast } = useToast();
 
   const [themes, setThemes] = useState([]);
   const [presentations, setPresentations] = useState([]);
   const [preferences, setPreferences] = useState(null);
+  const [currentPlan, setCurrentPlan] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [savingDefault, setSavingDefault] = useState(false);
@@ -216,8 +312,16 @@ export default function ThemesPage() {
   const [applyTheme, setApplyTheme] = useState(null);
   const [selectedPresentationId, setSelectedPresentationId] = useState('');
 
+  const defaultLockRef = useRef(false);
+  const applyLockRef = useRef(false);
+
   const loadPage = useCallback(async ({ silent = false } = {}) => {
     if (!user?.id) {
+      setThemes([]);
+      setPresentations([]);
+      setPreferences(null);
+      setCurrentPlan(null);
+      setLoadError('Entre na sua conta para acessar os temas.');
       setLoading(false);
       setRefreshing(false);
       return;
@@ -227,21 +331,54 @@ export default function ThemesPage() {
     setLoadError('');
 
     try {
-      const [themeRows, presentationRows, preferenceRows] = await Promise.all([
+      const [
+        themeRows,
+        presentationRows,
+        preferenceRows,
+        planRows,
+      ] = await Promise.all([
         base44.entities.PresentationTheme.filter({ active: true }, 'name'),
         base44.entities.Presentation.filter(
           { user_id: user.id, is_archived: false },
           '-updated_date',
         ),
-        base44.entities.UserPreference.filter({ user_id: user.id }),
+        base44.entities.UserPreference.filter({
+          user_id: user.id,
+        }),
+        profile?.plan_id && isProfilePlanActive(profile)
+          ? base44.entities.Plan.filter({
+              id: profile.plan_id,
+            })
+          : Promise.resolve([]),
       ]);
 
-      setThemes(Array.isArray(themeRows) ? themeRows : []);
-      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
+      setThemes(
+        uniqueById(themeRows).filter(
+          (theme) => theme.active !== false,
+        ),
+      );
+
+      setPresentations(
+        uniqueById(presentationRows).filter(
+          (presentation) => (
+            presentation.user_id === user.id
+            && presentation.is_archived !== true
+          ),
+        ),
+      );
+
       setPreferences(
-        Array.isArray(preferenceRows) && preferenceRows[0]
-          ? preferenceRows[0]
-          : { user_id: user.id, ...DEFAULT_PREFERENCES },
+        selectCurrentRecord(preferenceRows)
+        || {
+          user_id: user.id,
+          ...DEFAULT_PREFERENCES,
+        },
+      );
+
+      setCurrentPlan(
+        uniqueById(planRows).find(
+          (plan) => plan.id === profile?.plan_id,
+        ) || null,
       );
     } catch (error) {
       console.error('Erro ao carregar temas:', error);
@@ -255,7 +392,7 @@ export default function ThemesPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [toast, user?.id]);
+  }, [profile, toast, user?.id]);
 
   useEffect(() => {
     loadPage();
@@ -293,6 +430,22 @@ export default function ThemesPage() {
     });
   }, [filter, search, sort, themes]);
 
+  const canUsePremiumThemes = Boolean(
+    isAdmin
+    || (
+      isProfilePlanActive(profile)
+      && currentPlan?.can_use_premium_templates === true
+    ),
+  );
+
+  const isThemeLocked = useCallback(
+    (theme) => Boolean(
+      theme?.is_premium
+      && !canUsePremiumThemes
+    ),
+    [canUsePremiumThemes],
+  );
+
   const defaultThemeId = preferences?.default_theme_id || '';
 
   const stats = useMemo(() => ({
@@ -309,28 +462,70 @@ export default function ThemesPage() {
   };
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || savingDefault
+      || applyingTheme
+    ) {
+      return;
+    }
+
     setRefreshing(true);
     await loadPage({ silent: true });
   };
 
   const handleSetDefault = async (theme) => {
-    if (!user?.id || !theme?.id || savingDefault) return;
+    if (
+      !user?.id
+      || !theme?.id
+      || savingDefault
+      || defaultLockRef.current
+    ) {
+      return;
+    }
 
+    if (!themes.some((item) => item.id === theme.id)) {
+      toast({
+        title: 'Tema inválido',
+        description: 'Atualize a página e tente novamente.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (isThemeLocked(theme)) {
+      toast({
+        title: 'Tema disponível em um plano superior',
+        description:
+          'Confira os planos que liberam temas premium.',
+      });
+
+      window.location.href = '/my-plan';
+      return;
+    }
+
+    defaultLockRef.current = true;
     setSavingDefault(true);
+
     const previous = preferences;
+
     const nextPreferences = {
       ...(preferences || {}),
       user_id: user.id,
       default_theme_id: theme.id,
     };
+
     setPreferences(nextPreferences);
 
     try {
       let saved;
+
       if (preferences?.id) {
         saved = await base44.entities.UserPreference.update(
           preferences.id,
-          { default_theme_id: theme.id },
+          {
+            default_theme_id: theme.id,
+          },
         );
       } else {
         saved = await base44.entities.UserPreference.create({
@@ -340,25 +535,56 @@ export default function ThemesPage() {
         });
       }
 
-      if (saved?.id) setPreferences(saved);
+      if (!saved?.id) {
+        throw new Error(
+          'A preferência não retornou um ID válido.',
+        );
+      }
+
+      setPreferences(saved);
+
       toast({
         title: 'Tema padrão atualizado',
-        description: `${theme.name} será sugerido nas novas apresentações.`,
+        description:
+          `${theme.name} será sugerido nas novas apresentações.`,
       });
     } catch (error) {
-      console.error('Erro ao definir tema padrão:', error);
+      console.error(
+        'Erro ao definir tema padrão:',
+        error,
+      );
+
       setPreferences(previous);
+
       toast({
         title: 'Não foi possível salvar o tema padrão',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          error.message
+          || 'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
     } finally {
+      defaultLockRef.current = false;
       setSavingDefault(false);
     }
   };
 
   const openApplyDialog = (theme) => {
+    if (!theme?.id) {
+      return;
+    }
+
+    if (isThemeLocked(theme)) {
+      toast({
+        title: 'Tema disponível em um plano superior',
+        description:
+          'Confira os planos que liberam temas premium.',
+      });
+
+      window.location.href = '/my-plan';
+      return;
+    }
+
     setApplyTheme(theme);
     setSelectedPresentationId('');
   };
@@ -370,48 +596,120 @@ export default function ThemesPage() {
   };
 
   const handleApplyToPresentation = async () => {
-    if (!applyTheme?.id || !selectedPresentationId || applyingTheme) return;
+    if (
+      !applyTheme?.id
+      || !selectedPresentationId
+      || applyingTheme
+      || applyLockRef.current
+    ) {
+      return;
+    }
 
-    const target = presentations.find((item) => item.id === selectedPresentationId);
+    if (isThemeLocked(applyTheme)) {
+      toast({
+        title: 'Tema disponível em um plano superior',
+        description:
+          'Confira os planos que liberam temas premium.',
+      });
+      return;
+    }
+
+    const target = presentations.find((item) => (
+      item.id === selectedPresentationId
+      && item.user_id === user?.id
+      && item.is_archived !== true
+    ));
+
     if (!target) {
       toast({
-        title: 'Selecione uma apresentação',
+        title: 'Selecione uma apresentação válida',
+        description:
+          'Atualize a lista e tente novamente.',
         variant: 'destructive',
       });
       return;
     }
 
+    const themeStillAvailable = themes.some(
+      (theme) => theme.id === applyTheme.id,
+    );
+
+    if (!themeStillAvailable) {
+      toast({
+        title: 'Tema indisponível',
+        description:
+          'Ele pode ter sido desativado em outra janela.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    applyLockRef.current = true;
     setApplyingTheme(true);
 
     try {
-      await base44.entities.Presentation.update(selectedPresentationId, {
-        theme_id: applyTheme.id,
-      });
+      const updated = await base44.entities.Presentation.update(
+        target.id,
+        {
+          theme_id: applyTheme.id,
+        },
+      );
 
       setPresentations((current) => current.map((item) => (
-        item.id === selectedPresentationId
-          ? { ...item, theme_id: applyTheme.id }
+        item.id === target.id
+          ? {
+              ...item,
+              theme_id: applyTheme.id,
+              ...(updated || {}),
+            }
           : item
       )));
 
       toast({
         title: 'Tema aplicado',
-        description: `${applyTheme.name} foi aplicado em “${target.title}”.`,
+        description:
+          `${applyTheme.name} foi aplicado em “${target.title}”.`,
       });
-      closeApplyDialog();
+
+      setApplyTheme(null);
+      setSelectedPresentationId('');
     } catch (error) {
       console.error('Erro ao aplicar tema:', error);
+
       toast({
         title: 'Não foi possível aplicar o tema',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
     } finally {
+      applyLockRef.current = false;
       setApplyingTheme(false);
     }
   };
 
   if (userLoading || loading) return <LoadingState />;
+
+  if (!user?.id) {
+    return (
+      <div className="mx-auto flex min-h-[60vh] max-w-2xl items-center justify-center px-4">
+        <Card className="w-full border-dashed">
+          <CardContent className="flex flex-col items-center px-5 py-14 text-center">
+            <Palette className="h-10 w-10 text-muted-foreground" />
+            <h2 className="mt-4 text-lg font-semibold">
+              Entre para acessar os temas
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Seus temas padrão e apresentações ficam vinculados à sua conta.
+            </p>
+            <Button asChild className="mt-5">
+              <Link to="/login">Entrar</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   const hasFilters = Boolean(search.trim()) || filter !== 'all' || sort !== 'name';
 
@@ -433,7 +731,11 @@ export default function ThemesPage() {
           <Button
             variant="outline"
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || savingDefault
+              || applyingTheme
+            }
             className="flex-1 sm:flex-none"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
@@ -544,6 +846,7 @@ export default function ThemesPage() {
         <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
           {filteredThemes.map((theme) => {
             const isDefault = defaultThemeId === theme.id;
+            const isLocked = isThemeLocked(theme);
 
             return (
               <Card
@@ -601,9 +904,17 @@ export default function ThemesPage() {
                       <Eye className="mr-2 h-4 w-4" />
                       Visualizar
                     </Button>
-                    <Button onClick={() => openApplyDialog(theme)} disabled={presentations.length === 0}>
-                      <MonitorPlay className="mr-2 h-4 w-4" />
-                      Aplicar
+                    <Button
+                      onClick={() => openApplyDialog(theme)}
+                      disabled={presentations.length === 0}
+                      variant={isLocked ? 'secondary' : 'default'}
+                    >
+                      {isLocked ? (
+                        <Lock className="mr-2 h-4 w-4" />
+                      ) : (
+                        <MonitorPlay className="mr-2 h-4 w-4" />
+                      )}
+                      {isLocked ? 'Ver plano' : 'Aplicar'}
                     </Button>
                   </div>
 
@@ -614,7 +925,11 @@ export default function ThemesPage() {
                     onClick={() => handleSetDefault(theme)}
                   >
                     <Star className={`mr-2 h-4 w-4 ${isDefault ? 'fill-amber-400 text-amber-400' : ''}`} />
-                    {isDefault ? 'Tema padrão atual' : 'Definir como padrão'}
+                    {isDefault
+                      ? 'Tema padrão atual'
+                      : isLocked
+                        ? 'Ver plano'
+                        : 'Definir como padrão'}
                   </Button>
                 </CardContent>
               </Card>
@@ -686,8 +1001,18 @@ export default function ThemesPage() {
                       openApplyDialog(theme);
                     }}
                     disabled={presentations.length === 0}
+                    variant={
+                      isThemeLocked(previewTheme)
+                        ? 'secondary'
+                        : 'default'
+                    }
                   >
-                    Aplicar em apresentação
+                    {isThemeLocked(previewTheme) && (
+                      <Lock className="mr-2 h-4 w-4" />
+                    )}
+                    {isThemeLocked(previewTheme)
+                      ? 'Ver planos'
+                      : 'Aplicar em apresentação'}
                   </Button>
                 </DialogFooter>
               </div>
