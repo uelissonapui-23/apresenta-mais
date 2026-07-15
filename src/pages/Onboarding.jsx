@@ -2,6 +2,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 
@@ -294,12 +295,46 @@ function parseAccessibility(value) {
   }
 }
 
-function getFirstRecord(rows) {
-  return (
-    Array.isArray(rows)
-      ? rows[0] || null
-      : null
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
   );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function selectCurrentRecord(rows) {
+  return uniqueById(rows)
+    .sort((left, right) => {
+      const activeDifference = (
+        Number(right?.active !== false)
+        - Number(left?.active !== false)
+      );
+
+      if (activeDifference !== 0) {
+        return activeDifference;
+      }
+
+      return getRecordTimestamp(right) - getRecordTimestamp(left);
+    })[0] || null;
 }
 
 function OnboardingLoading() {
@@ -452,6 +487,11 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [initializing, setInitializing] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [skipping, setSkipping] = useState(false);
+
+  const initializeLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const skipLockRef = useRef(false);
 
   const [preferenceId, setPreferenceId] = useState(null);
 
@@ -476,7 +516,10 @@ export default function Onboarding() {
   const [finishAction, setFinishAction] = useState('guided');
 
   const initializeOnboarding = useCallback(async () => {
-    if (userLoading) {
+    if (
+      userLoading
+      || initializeLockRef.current
+    ) {
       return;
     }
 
@@ -488,6 +531,7 @@ export default function Onboarding() {
       return;
     }
 
+    initializeLockRef.current = true;
     setInitializing(true);
 
     try {
@@ -499,7 +543,7 @@ export default function Onboarding() {
         1,
       );
 
-      const preference = getFirstRecord(preferences);
+      const preference = selectCurrentRecord(preferences);
       const accessibility = parseAccessibility(
         preference?.accessibility_settings_json,
       );
@@ -571,6 +615,7 @@ export default function Onboarding() {
           'Você pode continuar. Usaremos valores iniciais seguros.',
       });
     } finally {
+      initializeLockRef.current = false;
       setInitializing(false);
     }
   }, [
@@ -657,10 +702,99 @@ export default function Onboarding() {
     ));
   };
 
+  const skipOnboarding = async () => {
+    if (
+      !user?.id
+      || saving
+      || skipping
+      || skipLockRef.current
+    ) {
+      return;
+    }
+
+    skipLockRef.current = true;
+    setSkipping(true);
+
+    try {
+      const fallbackName = String(
+        profile?.name
+        || user?.full_name
+        || user?.name
+        || user?.email?.split('@')?.[0]
+        || 'Usuário',
+      ).trim();
+
+      const profilePayload = {
+        user_id: user.id,
+        name: fallbackName || 'Usuário',
+        phone: profile?.phone || '',
+        onboarding_completed: true,
+        active: true,
+      };
+
+      let savedProfile;
+
+      if (profile?.id) {
+        savedProfile = await base44.entities.UserProfile.update(
+          profile.id,
+          profilePayload,
+        );
+      } else {
+        savedProfile = await base44.entities.UserProfile.create({
+          ...profilePayload,
+          role: 'user',
+        });
+      }
+
+      if (!savedProfile?.id) {
+        throw new Error(
+          'O perfil não retornou um ID válido.',
+        );
+      }
+
+      try {
+        await refreshProfile?.();
+      } catch (refreshError) {
+        console.warn(
+          'O onboarding foi concluído, mas o perfil não foi atualizado imediatamente:',
+          refreshError,
+        );
+      }
+
+      toast({
+        title: 'Configuração adiada',
+        description:
+          'Você poderá ajustar essas preferências depois em Configurações.',
+      });
+
+      navigate('/', {
+        replace: true,
+      });
+    } catch (error) {
+      console.error(
+        'Erro ao adiar o onboarding:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível continuar',
+        description:
+          error.message
+          || 'Confira sua conexão e tente novamente.',
+        variant: 'destructive',
+      });
+    } finally {
+      skipLockRef.current = false;
+      setSkipping(false);
+    }
+  };
+
   const saveOnboarding = async () => {
     if (
       !user?.id
       || saving
+      || skipping
+      || saveLockRef.current
     ) {
       return;
     }
@@ -678,6 +812,7 @@ export default function Onboarding() {
       return;
     }
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
@@ -703,16 +838,28 @@ export default function Onboarding() {
         });
       }
 
+      if (!savedProfile?.id) {
+        throw new Error(
+          'O perfil não retornou um ID válido.',
+        );
+      }
+
+      const currentPreferences = uniqueById(
+        await base44.entities.UserPreference.filter(
+          {
+            user_id: user.id,
+          },
+          '-updated_date',
+          20,
+        ),
+      );
+
+      const currentPreference = selectCurrentRecord(
+        currentPreferences,
+      );
+
       const previousAccessibility = parseAccessibility(
-        (
-          await base44.entities.UserPreference.filter(
-            {
-              user_id: user.id,
-            },
-            '-updated_date',
-            1,
-          )
-        )?.[0]?.accessibility_settings_json,
+        currentPreference?.accessibility_settings_json,
       );
 
       const accessibilitySettings = {
@@ -744,22 +891,32 @@ export default function Onboarding() {
         ),
       };
 
-      if (preferenceId) {
-        await base44.entities.UserPreference.update(
-          preferenceId,
+      const targetPreferenceId = (
+        preferenceId
+        || currentPreference?.id
+        || null
+      );
+
+      let savedPreference;
+
+      if (targetPreferenceId) {
+        savedPreference = await base44.entities.UserPreference.update(
+          targetPreferenceId,
           preferencePayload,
         );
       } else {
-        const createdPreference = (
-          await base44.entities.UserPreference.create(
-            preferencePayload,
-          )
-        );
-
-        setPreferenceId(
-          createdPreference?.id || null,
+        savedPreference = await base44.entities.UserPreference.create(
+          preferencePayload,
         );
       }
+
+      if (!savedPreference?.id) {
+        throw new Error(
+          'As preferências não retornaram um ID válido.',
+        );
+      }
+
+      setPreferenceId(savedPreference.id);
 
       try {
         await refreshProfile?.();
@@ -811,6 +968,7 @@ export default function Onboarding() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
@@ -841,10 +999,16 @@ export default function Onboarding() {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => navigate('/')}
-              disabled={saving}
+              onClick={skipOnboarding}
+              disabled={saving || skipping}
             >
-              Configurar depois
+              {skipping && (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              )}
+
+              {skipping
+                ? 'Continuando...'
+                : 'Configurar depois'}
             </Button>
           )}
         </div>
@@ -1324,7 +1488,7 @@ export default function Onboarding() {
                     type="button"
                     variant="outline"
                     onClick={goBack}
-                    disabled={saving}
+                    disabled={saving || skipping}
                     className="w-full sm:w-auto"
                   >
                     <ArrowLeft className="mr-2 h-4 w-4" />
