@@ -1,60 +1,201 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+
+import {
+  Link,
+  useNavigate,
+} from 'react-router-dom';
+
 import {
   ArrowRight,
   BookOpen,
+  CheckCircle2,
   Clock3,
   FileText,
   LayoutTemplate,
+  Loader2,
+  MoreVertical,
+  Pencil,
   Play,
   Plus,
   Presentation as PresentationIcon,
   RefreshCw,
   Sparkles,
   Star,
+  Target,
   Wand2,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
+
 import { useToast } from '@/components/ui/use-toast';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+
 import {
   Card,
   CardContent,
 } from '@/components/ui/card';
+
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
 import { Progress } from '@/components/ui/progress';
-import PresentationCard from '@/components/shared/PresentationCard';
 import EmptyState from '@/components/shared/EmptyState';
 
-const RECENT_PRESENTATIONS_LIMIT = 8;
-const RECENT_SESSIONS_LIMIT = 8;
 const RECOMMENDED_TEMPLATES_LIMIT = 6;
+const RECENT_PRESENTATIONS_LIMIT = 6;
+const RECENT_SESSIONS_LIMIT = 20;
 
-function clampPercentage(value) {
-  const number = Number(value) || 0;
-  return Math.min(100, Math.max(0, Math.round(number)));
+const STATUS_LABELS = {
+  draft: 'Rascunho',
+  ready: 'Pronta',
+  in_progress: 'Em andamento',
+  completed: 'Concluída',
+  archived: 'Arquivada',
+};
+
+const STATUS_CLASSES = {
+  draft:
+    'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300',
+
+  ready:
+    'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
+
+  in_progress:
+    'border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300',
+
+  completed:
+    'border-violet-200 bg-violet-100 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300',
+
+  archived:
+    'border-border bg-muted text-muted-foreground',
+};
+
+const NEED_MESSAGES = {
+  organize_ideas: {
+    title: 'Organize suas ideias com clareza',
+    description:
+      'Comece livremente e transforme pensamentos soltos em uma sequência fácil de acompanhar.',
+
+    actionLabel: 'Criar do zero',
+    actionPath: '/new-presentation',
+  },
+
+  guided_creation: {
+    title: 'Vamos montar sua apresentação juntos',
+    description:
+      'Responda perguntas simples e receba uma estrutura adequada ao seu objetivo.',
+
+    actionLabel: 'Criar com ajuda',
+    actionPath: '/new-presentation?mode=guided',
+  },
+
+  time_control: {
+    title: 'Planeje o conteúdo dentro do tempo disponível',
+    description:
+      'Defina a duração, distribua o tempo entre os assuntos e pratique antes de apresentar.',
+
+    actionLabel: 'Criar apresentação',
+    actionPath: '/new-presentation',
+  },
+
+  not_get_lost: {
+    title: 'Apresente sem perder a sequência',
+    description:
+      'Prepare tópicos claros e use o modo apresentação para acompanhar o progresso visual.',
+
+    actionLabel: 'Criar apresentação',
+    actionPath: '/new-presentation?mode=guided',
+  },
+};
+
+function toNumber(value, fallback = 0) {
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : fallback;
 }
 
-function formatDuration(seconds) {
-  const totalSeconds = Math.max(0, Number(seconds) || 0);
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
+function clampPercentage(value) {
+  return Math.min(
+    100,
+    Math.max(
+      0,
+      Math.round(toNumber(value)),
+    ),
+  );
+}
 
-  if (minutes < 1) {
-    return `${remainingSeconds}s`;
+function formatDuration(totalSeconds) {
+  const safeSeconds = Math.max(
+    0,
+    Math.round(toNumber(totalSeconds)),
+  );
+
+  const hours = Math.floor(
+    safeSeconds / 3600,
+  );
+
+  const minutes = Math.floor(
+    (safeSeconds % 3600) / 60,
+  );
+
+  const seconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0
+      ? `${hours}h ${minutes}min`
+      : `${hours}h`;
   }
 
-  if (remainingSeconds === 0) {
-    return `${minutes} min`;
+  if (minutes > 0) {
+    return seconds > 0
+      ? `${minutes}min ${seconds}s`
+      : `${minutes} min`;
   }
 
-  return `${minutes}min ${remainingSeconds}s`;
+  return `${seconds}s`;
+}
+
+function parseAccessibility(value) {
+  if (!value) {
+    return {};
+  }
+
+  if (typeof value === 'object') {
+    return value;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+
+    return (
+      parsed
+      && typeof parsed === 'object'
+    )
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function getSessionLabel(type) {
-  return type === 'presentation' ? 'Apresentação' : 'Ensaio';
+  return type === 'presentation'
+    ? 'Apresentação'
+    : 'Ensaio';
 }
 
 function getSessionRoute(session) {
@@ -67,11 +208,19 @@ function getSessionRoute(session) {
     : `/rehearsal/${session.presentation_id}`;
 }
 
+function getPresentationEditorRoute(presentationId) {
+  return `/presentations/${presentationId}/editor`;
+}
+
+function getPresentationOverviewRoute(presentationId) {
+  return `/presentations/${presentationId}/overview`;
+}
+
 function DashboardLoading() {
   return (
     <div className="flex min-h-[60vh] items-center justify-center px-4">
       <div className="flex flex-col items-center gap-3 text-muted-foreground">
-        <div className="h-9 w-9 animate-spin rounded-full border-4 border-muted border-t-primary" />
+        <Loader2 className="h-9 w-9 animate-spin text-primary" />
 
         <span className="text-sm">
           Preparando seu painel...
@@ -96,10 +245,10 @@ function QuickAction({
       <Card className="h-full border-border/70 transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
         <CardContent className="flex h-full items-center gap-3 p-4 sm:p-5">
           <div
-            className={`
-              flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl
-              ${accentClass}
-            `}
+            className={[
+              'flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl',
+              accentClass,
+            ].join(' ')}
           >
             <Icon className="h-6 w-6" />
           </div>
@@ -161,8 +310,15 @@ function ContinueSessionCard({
   presentation,
 }) {
   const route = getSessionRoute(session);
+
   const progress = clampPercentage(
     presentation?.progress_percentage,
+  );
+
+  const sessionStatus = (
+    session.status === 'paused'
+      ? 'Pausada'
+      : 'Em andamento'
   );
 
   return (
@@ -172,7 +328,7 @@ function ContinueSessionCard({
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-2">
               <Badge className="bg-primary text-primary-foreground">
-                Sessão em andamento
+                Sessão {sessionStatus.toLowerCase()}
               </Badge>
 
               <Badge variant="outline">
@@ -180,7 +336,7 @@ function ContinueSessionCard({
               </Badge>
             </div>
 
-            <h2 className="truncate text-xl font-bold sm:text-2xl">
+            <h2 className="break-words text-xl font-bold sm:text-2xl">
               {presentation?.title || 'Apresentação em andamento'}
             </h2>
 
@@ -192,20 +348,22 @@ function ContinueSessionCard({
               </span>
 
               <span className="inline-flex items-center gap-1.5">
-                <FileText className="h-4 w-4" />
+                <CheckCircle2 className="h-4 w-4" />
 
-                {Number(session.completed_count) || 0} tópicos concluídos
+                {toNumber(session.completed_count)} tópicos concluídos
               </span>
             </div>
 
-            <div className="mt-4 max-w-xl">
-              <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
-                <span>Progresso salvo</span>
-                <span>{progress}%</span>
-              </div>
+            {progress > 0 && (
+              <div className="mt-4 max-w-xl">
+                <div className="mb-1.5 flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Progresso salvo</span>
+                  <span>{progress}%</span>
+                </div>
 
-              <Progress value={progress} />
-            </div>
+                <Progress value={progress} />
+              </div>
+            )}
           </div>
 
           <Button
@@ -218,6 +376,154 @@ function ContinueSessionCard({
               Continuar
             </Link>
           </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function RecentPresentationCard({
+  presentation,
+  typeName,
+  objectiveName,
+  onFavorite,
+}) {
+  const progress = clampPercentage(
+    presentation.progress_percentage,
+  );
+
+  const status = (
+    presentation.status
+    || 'draft'
+  );
+
+  return (
+    <Card className="group min-w-0 border-border/70 transition-all hover:border-primary/25 hover:shadow-md">
+      <CardContent className="p-4">
+        <div className="flex min-w-0 items-start gap-3">
+          <Link
+            to={getPresentationEditorRoute(presentation.id)}
+            className="min-w-0 flex-1"
+          >
+            <h3 className="truncate font-semibold transition-colors group-hover:text-primary">
+              {presentation.title || 'Apresentação sem título'}
+            </h3>
+
+            <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">
+              {presentation.main_theme
+                || presentation.subtitle
+                || objectiveName
+                || 'Continue organizando sua apresentação.'}
+            </p>
+          </Link>
+
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8"
+              onClick={() => onFavorite(presentation)}
+              aria-label={
+                presentation.is_favorite
+                  ? 'Remover dos favoritos'
+                  : 'Adicionar aos favoritos'
+              }
+            >
+              <Star
+                className={[
+                  'h-4 w-4',
+                  presentation.is_favorite
+                    ? 'fill-amber-400 text-amber-400'
+                    : 'text-muted-foreground',
+                ].join(' ')}
+              />
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  aria-label="Mais ações"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem asChild>
+                  <Link to={getPresentationEditorRoute(presentation.id)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Editar
+                  </Link>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem asChild>
+                  <Link to={getPresentationOverviewRoute(presentation.id)}>
+                    <Target className="mr-2 h-4 w-4" />
+                    Visão geral
+                  </Link>
+                </DropdownMenuItem>
+
+                <DropdownMenuSeparator />
+
+                <DropdownMenuItem asChild>
+                  <Link to={`/rehearsal/${presentation.id}`}>
+                    <Play className="mr-2 h-4 w-4" />
+                    Ensaiar
+                  </Link>
+                </DropdownMenuItem>
+
+                <DropdownMenuItem asChild>
+                  <Link to={`/present/${presentation.id}`}>
+                    <PresentationIcon className="mr-2 h-4 w-4" />
+                    Apresentar
+                  </Link>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <Badge
+            variant="outline"
+            className={STATUS_CLASSES[status]}
+          >
+            {STATUS_LABELS[status] || status}
+          </Badge>
+
+          {typeName && (
+            <Badge
+              variant="secondary"
+              className="text-xs"
+            >
+              {typeName}
+            </Badge>
+          )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <Clock3 className="h-3.5 w-3.5" />
+            {toNumber(presentation.estimated_duration_minutes)} min
+          </span>
+
+          {progress > 0 && (
+            <div className="flex min-w-[110px] items-center gap-2">
+              <Progress
+                value={progress}
+                className="h-1.5 flex-1"
+              />
+
+              <span>
+                {progress}%
+              </span>
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -282,6 +588,7 @@ export default function Home() {
   const [objectives, setObjectives] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [preferences, setPreferences] = useState(null);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -308,14 +615,13 @@ export default function Home() {
           objectiveRows,
           sessionRows,
           templateRows,
+          preferenceRows,
         ] = await Promise.all([
           base44.entities.Presentation.filter(
             {
               user_id: user.id,
-              is_archived: false,
             },
             '-updated_date',
-            RECENT_PRESENTATIONS_LIMIT,
           ),
 
           base44.entities.PresentationType.filter(
@@ -348,6 +654,14 @@ export default function Home() {
             'name',
             RECOMMENDED_TEMPLATES_LIMIT,
           ),
+
+          base44.entities.UserPreference.filter(
+            {
+              user_id: user.id,
+            },
+            '-updated_date',
+            1,
+          ),
         ]);
 
         setPresentations(
@@ -379,6 +693,12 @@ export default function Home() {
             ? templateRows
             : [],
         );
+
+        setPreferences(
+          Array.isArray(preferenceRows)
+            ? preferenceRows[0] || null
+            : null,
+        );
       } catch (error) {
         console.error(
           'Erro ao carregar dashboard:',
@@ -391,7 +711,8 @@ export default function Home() {
 
         toast({
           title: 'Falha ao carregar o painel',
-          description: 'Confira sua conexão e tente novamente.',
+          description:
+            'Confira sua conexão e tente novamente.',
           variant: 'destructive',
         });
       } finally {
@@ -439,6 +760,16 @@ export default function Home() {
     [presentations],
   );
 
+  const activePresentations = useMemo(
+    () => presentations.filter(
+      (item) => (
+        !item.is_archived
+        && item.status !== 'archived'
+      ),
+    ),
+    [presentations],
+  );
+
   const activeSession = useMemo(
     () => sessions.find(
       (session) => (
@@ -454,15 +785,18 @@ export default function Home() {
     : null;
 
   const recentPresentations = useMemo(
-    () => presentations.slice(0, 5),
-    [presentations],
+    () => activePresentations.slice(
+      0,
+      RECENT_PRESENTATIONS_LIMIT,
+    ),
+    [activePresentations],
   );
 
   const favoritePresentations = useMemo(
-    () => presentations
+    () => activePresentations
       .filter((item) => item.is_favorite)
       .slice(0, 4),
-    [presentations],
+    [activePresentations],
   );
 
   const completedSessions = useMemo(
@@ -475,14 +809,38 @@ export default function Home() {
   const totalPracticeSeconds = useMemo(
     () => completedSessions.reduce(
       (total, session) => (
-        total + (Number(session.elapsed_seconds) || 0)
+        total + toNumber(session.elapsed_seconds)
       ),
       0,
     ),
     [completedSessions],
   );
 
+  const presentationSessionCount = useMemo(
+    () => sessions.filter(
+      (session) => (
+        session.session_type === 'presentation'
+      ),
+    ).length,
+    [sessions],
+  );
+
+  const personalization = useMemo(() => {
+    const accessibility = parseAccessibility(
+      preferences?.accessibility_settings_json,
+    );
+
+    return (
+      NEED_MESSAGES[accessibility.primary_need]
+      || NEED_MESSAGES.guided_creation
+    );
+  }, [preferences?.accessibility_settings_json]);
+
   const handleRefresh = async () => {
+    if (refreshing) {
+      return;
+    }
+
     setRefreshing(true);
 
     await loadDashboard({
@@ -534,17 +892,24 @@ export default function Home() {
 
       toast({
         title: 'Não foi possível atualizar o favorito',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          'Tente novamente em alguns instantes.',
         variant: 'destructive',
       });
     }
   };
 
-  if (userLoading || loading) {
+  if (
+    userLoading
+    || loading
+  ) {
     return <DashboardLoading />;
   }
 
-  if (profile && !profile.onboarding_completed) {
+  if (
+    profile
+    && profile.onboarding_completed !== true
+  ) {
     return (
       <div className="mx-auto flex min-h-[70vh] max-w-2xl items-center px-4 py-10">
         <Card className="w-full overflow-hidden border-primary/20">
@@ -569,7 +934,6 @@ export default function Home() {
             >
               <Link to="/onboarding">
                 Começar configuração
-
                 <ArrowRight className="ml-2 h-5 w-5" />
               </Link>
             </Button>
@@ -586,9 +950,11 @@ export default function Home() {
     || 'Apresentador'
   );
 
-  const hasPresentations = presentations.length > 0;
+  const hasPresentations = (
+    activePresentations.length > 0
+  );
 
-  const favoriteCount = presentations.filter(
+  const favoriteCount = activePresentations.filter(
     (item) => item.is_favorite,
   ).length;
 
@@ -600,7 +966,7 @@ export default function Home() {
             Seu espaço de criação
           </p>
 
-          <h1 className="mt-1 truncate text-2xl font-bold sm:text-3xl">
+          <h1 className="mt-1 break-words text-2xl font-bold sm:text-3xl">
             Olá, {displayName}
           </h1>
 
@@ -618,10 +984,10 @@ export default function Home() {
           className="w-full sm:w-auto"
         >
           <RefreshCw
-            className={`
-              mr-2 h-4 w-4
-              ${refreshing ? 'animate-spin' : ''}
-            `}
+            className={[
+              'mr-2 h-4 w-4',
+              refreshing ? 'animate-spin' : '',
+            ].join(' ')}
           />
 
           Atualizar
@@ -651,6 +1017,38 @@ export default function Home() {
           session={activeSession}
           presentation={activeSessionPresentation}
         />
+      )}
+
+      {!activeSession && (
+        <Card className="overflow-hidden border-primary/20 bg-primary/5">
+          <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+            <div className="flex min-w-0 items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-background shadow-sm">
+                <Target className="h-5 w-5 text-primary" />
+              </div>
+
+              <div className="min-w-0">
+                <h2 className="font-semibold">
+                  {personalization.title}
+                </h2>
+
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                  {personalization.description}
+                </p>
+              </div>
+            </div>
+
+            <Button
+              asChild
+              className="w-full shrink-0 sm:w-auto"
+            >
+              <Link to={personalization.actionPath}>
+                {personalization.actionLabel}
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       <section aria-labelledby="quick-actions-title">
@@ -703,7 +1101,7 @@ export default function Home() {
         <StatCard
           icon={PresentationIcon}
           label="Apresentações"
-          value={presentations.length}
+          value={activePresentations.length}
           description="Ativas e não arquivadas"
         />
 
@@ -716,16 +1114,16 @@ export default function Home() {
 
         <StatCard
           icon={Play}
-          label="Sessões"
+          label="Sessões recentes"
           value={sessions.length}
-          description="Ensaios e apresentações"
+          description={`${presentationSessionCount} apresentações reais`}
         />
 
         <StatCard
           icon={Clock3}
           label="Tempo praticado"
           value={formatDuration(totalPracticeSeconds)}
-          description="Nas sessões recentes"
+          description="Nas sessões recentes concluídas"
         />
       </section>
 
@@ -762,7 +1160,6 @@ export default function Home() {
             >
               <Link to="/presentations">
                 Ver todas
-
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>
             </Button>
@@ -770,7 +1167,7 @@ export default function Home() {
 
           <div className="grid gap-3 lg:grid-cols-2">
             {recentPresentations.map((presentation) => (
-              <PresentationCard
+              <RecentPresentationCard
                 key={presentation.id}
                 presentation={presentation}
                 typeName={
@@ -801,7 +1198,7 @@ export default function Home() {
 
           <div className="grid gap-3 md:grid-cols-2">
             {favoritePresentations.map((presentation) => (
-              <PresentationCard
+              <RecentPresentationCard
                 key={presentation.id}
                 presentation={presentation}
                 typeName={
@@ -840,7 +1237,6 @@ export default function Home() {
             >
               <Link to="/templates">
                 Explorar
-
                 <ArrowRight className="ml-1.5 h-4 w-4" />
               </Link>
             </Button>
