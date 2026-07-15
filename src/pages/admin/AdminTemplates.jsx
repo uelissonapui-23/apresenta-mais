@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowDown,
@@ -68,6 +68,73 @@ const DEFAULT_FORM = {
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortDeepestFirst(blocks) {
+  return [...blocks].sort((left, right) => {
+    const depthDifference = (
+      normalizeNumber(right?.depth_level)
+      - normalizeNumber(left?.depth_level)
+    );
+
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return (
+      normalizeNumber(right?.order_index)
+      - normalizeNumber(left?.order_index)
+    );
+  });
+}
+
+function sortForHierarchyCreation(blocks) {
+  return [...blocks].sort((left, right) => {
+    const depthDifference = (
+      normalizeNumber(left?.depth_level)
+      - normalizeNumber(right?.depth_level)
+    );
+
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return (
+      normalizeNumber(left?.order_index)
+      - normalizeNumber(right?.order_index)
+    );
+  });
+}
+
+function createUniqueCopyName(baseName, templates) {
+  const normalizedBase = String(baseName || 'Modelo').trim() || 'Modelo';
+  const existingNames = new Set(
+    uniqueById(templates).map((template) => (
+      String(template.name || '').trim().toLowerCase()
+    )),
+  );
+
+  let attempt = 1;
+  let candidate = `${normalizedBase} — cópia`;
+
+  while (existingNames.has(candidate.toLowerCase())) {
+    attempt += 1;
+    candidate = `${normalizedBase} — cópia ${attempt}`;
+  }
+
+  return candidate;
 }
 
 function AccessDenied() {
@@ -305,7 +372,11 @@ function StructureItem({ node, level = 0 }) {
 export default function AdminTemplates() {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, profile, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
 
   const [templates, setTemplates] = useState([]);
   const [templateBlocks, setTemplateBlocks] = useState([]);
@@ -324,11 +395,11 @@ export default function AdminTemplates() {
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [previewTemplate, setPreviewTemplate] = useState(null);
   const [structureEditorTemplate, setStructureEditorTemplate] = useState(null);
-
-  const isAdmin = profile?.role === 'admin';
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
     if (!user?.id || !isAdmin) {
@@ -349,12 +420,21 @@ export default function AdminTemplates() {
         base44.entities.BlockType.filter({ active: true }, 'order_index'),
       ]);
 
-      setTemplates(Array.isArray(templateRows) ? templateRows : []);
-      setTemplateBlocks(Array.isArray(blockRows) ? blockRows : []);
-      setTypes(Array.isArray(typeRows) ? typeRows : []);
-      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
-      setStyles(Array.isArray(styleRows) ? styleRows : []);
-      setBlockTypes(Array.isArray(blockTypeRows) ? blockTypeRows : []);
+      const normalizedTemplates = uniqueById(templateRows);
+      const validTemplateIds = new Set(
+        normalizedTemplates.map((template) => template.id),
+      );
+
+      setTemplates(normalizedTemplates);
+      setTemplateBlocks(
+        uniqueById(blockRows).filter(
+          (block) => validTemplateIds.has(block.template_id),
+        ),
+      );
+      setTypes(uniqueById(typeRows));
+      setObjectives(uniqueById(objectiveRows));
+      setStyles(uniqueById(styleRows));
+      setBlockTypes(uniqueById(blockTypeRows));
     } catch (error) {
       console.error('Erro ao carregar modelos:', error);
       toast({
@@ -432,6 +512,10 @@ export default function AdminTemplates() {
   };
 
   const handleSave = async () => {
+    if (saving || saveLockRef.current) {
+      return;
+    }
+
     if (!form.name.trim()) {
       toast({ title: 'Informe o nome do modelo', variant: 'destructive' });
       return;
@@ -461,6 +545,7 @@ export default function AdminTemplates() {
       active: Boolean(form.active),
     };
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
@@ -483,28 +568,68 @@ export default function AdminTemplates() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (template) => {
+    if (!template?.id || busyId || actionLockRef.current) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(template.id);
+
     try {
       const active = !template.active;
-      await base44.entities.PresentationTemplate.update(template.id, { active });
-      setTemplates((current) => current.map((item) => item.id === template.id ? { ...item, active } : item));
-      toast({ title: active ? 'Modelo ativado' : 'Modelo desativado' });
+      const updated = await base44.entities.PresentationTemplate.update(
+        template.id,
+        { active },
+      );
+
+      setTemplates((current) => current.map((item) => (
+        item.id === template.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active,
+            }
+          : item
+      )));
+
+      toast({
+        title: active
+          ? 'Modelo ativado'
+          : 'Modelo desativado',
+      });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
-      toast({ title: 'Não foi possível alterar o status', variant: 'destructive' });
+      toast({
+        title: 'Não foi possível alterar o status',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleDuplicate = async (template) => {
+    if (
+      !template?.id
+      || !user?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(template.id);
+
     let createdTemplate = null;
+    const createdBlocks = [];
 
     try {
       createdTemplate = await base44.entities.PresentationTemplate.create({
@@ -512,7 +637,7 @@ export default function AdminTemplates() {
         presentation_type_id: template.presentation_type_id || null,
         objective_id: template.objective_id || null,
         communication_style_id: template.communication_style_id || null,
-        name: `${template.name || 'Modelo'} — cópia`,
+        name: createUniqueCopyName(template.name, templates),
         description: template.description || '',
         thumbnail_url: template.thumbnail_url || '',
         is_official: false,
@@ -521,71 +646,215 @@ export default function AdminTemplates() {
         active: true,
       });
 
-      const sourceBlocks = templateBlocks
-        .filter((block) => block.template_id === template.id)
-        .sort((a, b) => normalizeNumber(a.depth_level) - normalizeNumber(b.depth_level) || normalizeNumber(a.order_index) - normalizeNumber(b.order_index));
-
-      const idMap = {};
-      const newBlocks = [];
-
-      for (const block of sourceBlocks) {
-        const createdBlock = await base44.entities.TemplateBlock.create({
-          template_id: createdTemplate.id,
-          parent_id: block.parent_id ? (idMap[block.parent_id] || null) : null,
-          block_type_id: block.block_type_id || null,
-          title: block.title || '',
-          summary: block.summary || '',
-          content: block.content || '',
-          presenter_notes: block.presenter_notes || '',
-          order_index: normalizeNumber(block.order_index),
-          depth_level: normalizeNumber(block.depth_level),
-          importance_level: normalizeNumber(block.importance_level, 3),
-          estimated_duration_seconds: normalizeNumber(block.estimated_duration_seconds),
-          is_essential: Boolean(block.is_essential),
-        });
-        idMap[block.id] = createdBlock.id;
-        newBlocks.push(createdBlock);
+      if (!createdTemplate?.id) {
+        throw new Error('A cópia do modelo não retornou um ID válido.');
       }
 
-      setTemplates((current) => [createdTemplate, ...current]);
-      setTemplateBlocks((current) => [...current, ...newBlocks]);
-      toast({ title: 'Modelo duplicado com sucesso' });
+      const sourceBlocks = sortForHierarchyCreation(
+        uniqueById(templateBlocks).filter(
+          (block) => block.template_id === template.id,
+        ),
+      );
+
+      const idMap = new Map();
+      const pending = [...sourceBlocks];
+      let safetyCounter = pending.length + 1;
+
+      while (pending.length > 0 && safetyCounter > 0) {
+        safetyCounter -= 1;
+        let createdInRound = 0;
+
+        for (let index = pending.length - 1; index >= 0; index -= 1) {
+          const block = pending[index];
+          const parentReady = (
+            !block.parent_id
+            || idMap.has(block.parent_id)
+          );
+
+          if (!parentReady) {
+            continue;
+          }
+
+          const createdBlock = await base44.entities.TemplateBlock.create({
+            template_id: createdTemplate.id,
+            parent_id: block.parent_id
+              ? idMap.get(block.parent_id)
+              : null,
+            block_type_id: block.block_type_id || null,
+            title: block.title || '',
+            summary: block.summary || '',
+            content: block.content || '',
+            additional_content: block.additional_content || '',
+            presenter_notes: block.presenter_notes || '',
+            order_index: normalizeNumber(block.order_index),
+            depth_level: normalizeNumber(block.depth_level),
+            importance_level: normalizeNumber(
+              block.importance_level,
+              3,
+            ),
+            estimated_duration_seconds: normalizeNumber(
+              block.estimated_duration_seconds,
+              60,
+            ),
+            is_essential: Boolean(block.is_essential),
+            is_hidden: Boolean(block.is_hidden),
+            show_to_audience: block.show_to_audience !== false,
+            icon: block.icon || '',
+            background_style: block.background_style || '',
+            text_style: block.text_style || '',
+          });
+
+          if (!createdBlock?.id) {
+            throw new Error(
+              'A cópia de um bloco não retornou um ID válido.',
+            );
+          }
+
+          idMap.set(block.id, createdBlock.id);
+          createdBlocks.push(createdBlock);
+          pending.splice(index, 1);
+          createdInRound += 1;
+        }
+
+        if (createdInRound === 0) {
+          throw new Error(
+            'A estrutura possui uma referência de pai inválida.',
+          );
+        }
+      }
+
+      if (pending.length > 0) {
+        throw new Error(
+          'A estrutura não pôde ser copiada por completo.',
+        );
+      }
+
+      setTemplates((current) => [
+        createdTemplate,
+        ...current,
+      ]);
+
+      setTemplateBlocks((current) => [
+        ...current,
+        ...createdBlocks,
+      ]);
+
+      toast({
+        title: 'Modelo duplicado com sucesso',
+      });
     } catch (error) {
       console.error('Erro ao duplicar modelo:', error);
-      if (createdTemplate?.id) {
-        try { await base44.entities.PresentationTemplate.delete(createdTemplate.id); } catch (_) { /* limpeza best effort */ }
+
+      for (const block of sortDeepestFirst(createdBlocks)) {
+        try {
+          await base44.entities.TemplateBlock.delete(block.id);
+        } catch (cleanupError) {
+          console.error(
+            'Erro ao remover bloco incompleto:',
+            cleanupError,
+          );
+        }
       }
-      toast({ title: 'Não foi possível duplicar o modelo', variant: 'destructive' });
+
+      if (createdTemplate?.id) {
+        try {
+          const remainingBlocks = uniqueById(
+            await base44.entities.TemplateBlock.filter({
+              template_id: createdTemplate.id,
+            }),
+          );
+
+          for (const block of sortDeepestFirst(remainingBlocks)) {
+            await base44.entities.TemplateBlock.delete(block.id);
+          }
+
+          await base44.entities.PresentationTemplate.delete(
+            createdTemplate.id,
+          );
+        } catch (cleanupError) {
+          console.error(
+            'Erro ao remover modelo incompleto:',
+            cleanupError,
+          );
+        }
+      }
+
+      toast({
+        title: 'Não foi possível duplicar o modelo',
+        description:
+          error.message
+          || 'A cópia incompleta foi removida.',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const confirmDelete = async () => {
     const template = deleteTarget;
-    if (!template?.id) return;
 
+    if (
+      !template?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(template.id);
 
     try {
-      const relatedBlocks = templateBlocks.filter((block) => block.template_id === template.id);
-      for (const block of relatedBlocks.sort((a, b) => normalizeNumber(b.depth_level) - normalizeNumber(a.depth_level))) {
+      const relatedBlocks = uniqueById(
+        await base44.entities.TemplateBlock.filter({
+          template_id: template.id,
+        }),
+      );
+
+      for (const block of sortDeepestFirst(relatedBlocks)) {
         await base44.entities.TemplateBlock.delete(block.id);
       }
-      await base44.entities.PresentationTemplate.delete(template.id);
-      setTemplates((current) => current.filter((item) => item.id !== template.id));
-      setTemplateBlocks((current) => current.filter((block) => block.template_id !== template.id));
-      toast({ title: 'Modelo excluído' });
+
+      await base44.entities.PresentationTemplate.delete(
+        template.id,
+      );
+
+      setTemplates((current) => current.filter(
+        (item) => item.id !== template.id,
+      ));
+
+      setTemplateBlocks((current) => current.filter(
+        (block) => block.template_id !== template.id,
+      ));
+
+      toast({
+        title: 'Modelo excluído',
+      });
     } catch (error) {
       console.error('Erro ao excluir modelo:', error);
-      toast({ title: 'Não foi possível excluir o modelo', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível excluir o modelo',
+        description:
+          'A exclusão foi interrompida para evitar inconsistências.',
+        variant: 'destructive',
+      });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
       setDeleteTarget(null);
     }
   };
 
   const handleRefresh = async () => {
+    if (refreshing || saving || busyId) {
+      return;
+    }
+
     setRefreshing(true);
     await loadData({ silent: true });
   };
