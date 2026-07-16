@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlignLeft,
@@ -79,6 +79,37 @@ const ICON_OPTIONS = [
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortByOrderAndName(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const orderDifference = (
+      normalizeNumber(left?.order_index)
+      - normalizeNumber(right?.order_index)
+    );
+
+    if (orderDifference !== 0) {
+      return orderDifference;
+    }
+
+    return String(left?.name || '').localeCompare(
+      String(right?.name || ''),
+      'pt-BR',
+      { sensitivity: 'base' },
+    );
+  });
 }
 
 function normalizeCode(value) {
@@ -317,13 +348,25 @@ export default function AdminBlockTypes() {
   const hasAdminAccess = isAdmin || profile?.role === 'admin';
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (loadLockRef.current) {
+      return;
+    }
+
     if (!user?.id || !hasAdminAccess) {
+      setBlockTypes([]);
+      setPresentationBlocks([]);
+      setTemplateBlocks([]);
+      setGuidedQuestions([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    if (!silent) setLoading(true);
+    loadLockRef.current = true;
+
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [typeRows, presentationBlockRows, templateBlockRows, questionRows] = await Promise.all([
@@ -345,6 +388,7 @@ export default function AdminBlockTypes() {
         variant: 'destructive',
       });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -453,6 +497,13 @@ export default function AdminBlockTypes() {
   };
 
   const handleSave = async () => {
+    if (
+      saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
+
     const name = form.name.trim();
     const code = normalizeCode(form.code || form.name);
 
@@ -494,6 +545,7 @@ export default function AdminBlockTypes() {
       return;
     }
 
+    saveLockRef.current = true;
     setSaving(true);
 
     const payload = {
@@ -512,15 +564,45 @@ export default function AdminBlockTypes() {
 
     try {
       if (editingBlockType) {
-        const updated = await base44.entities.BlockType.update(editingBlockType.id, payload);
-        setBlockTypes((current) => current.map((item) => (
-          item.id === editingBlockType.id ? { ...item, ...payload, ...updated } : item
-        )));
-        toast({ title: 'Tipo de bloco atualizado' });
+        const updated = await base44.entities.BlockType.update(
+          editingBlockType.id,
+          payload,
+        );
+
+        setBlockTypes((current) => sortByOrderAndName(
+          current.map((item) => (
+            item.id === editingBlockType.id
+              ? {
+                  ...item,
+                  ...payload,
+                  ...(updated || {}),
+                }
+              : item
+          )),
+        ));
+
+        toast({
+          title: 'Tipo de bloco atualizado',
+        });
       } else {
-        const created = await base44.entities.BlockType.create(payload);
-        setBlockTypes((current) => [...current, created]);
-        toast({ title: 'Tipo de bloco criado' });
+        const created = await base44.entities.BlockType.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'O novo tipo de bloco não retornou um ID válido.',
+          );
+        }
+
+        setBlockTypes((current) => sortByOrderAndName([
+          ...current,
+          created,
+        ]));
+
+        toast({
+          title: 'Tipo de bloco criado',
+        });
       }
 
       setDialogOpen(false);
@@ -534,69 +616,171 @@ export default function AdminBlockTypes() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (blockType) => {
+    if (
+      !blockType?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(blockType.id);
+
     const nextValue = !blockType.active;
 
     try {
-      await base44.entities.BlockType.update(blockType.id, { active: nextValue });
+      const updated = await base44.entities.BlockType.update(
+        blockType.id,
+        {
+          active: nextValue,
+        },
+      );
+
       setBlockTypes((current) => current.map((item) => (
-        item.id === blockType.id ? { ...item, active: nextValue } : item
+        item.id === blockType.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active: nextValue,
+            }
+          : item
       )));
-      toast({ title: nextValue ? 'Tipo ativado' : 'Tipo desativado' });
+
+      toast({
+        title: nextValue
+          ? 'Tipo ativado'
+          : 'Tipo desativado',
+      });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
-      toast({ title: 'Não foi possível alterar o status', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível alterar o status',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleMove = async (blockType, direction) => {
-    const currentIndex = sortedBlockTypes.findIndex((item) => item.id === blockType.id);
+    if (
+      !blockType?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    const currentIndex = sortedBlockTypes.findIndex(
+      (item) => item.id === blockType.id,
+    );
+
     const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedBlockTypes.length) return;
+
+    if (
+      currentIndex < 0
+      || targetIndex < 0
+      || targetIndex >= sortedBlockTypes.length
+    ) {
+      return;
+    }
 
     const target = sortedBlockTypes[targetIndex];
-    const currentOrder = normalizeNumber(blockType.order_index, currentIndex);
-    const targetOrder = normalizeNumber(target.order_index, targetIndex);
 
+    const currentOrder = normalizeNumber(
+      blockType.order_index,
+      currentIndex,
+    );
+
+    const targetOrder = normalizeNumber(
+      target.order_index,
+      targetIndex,
+    );
+
+    actionLockRef.current = true;
     setBusyId(blockType.id);
+
     try {
-      await Promise.all([
-        base44.entities.BlockType.update(blockType.id, { order_index: targetOrder }),
-        base44.entities.BlockType.update(target.id, { order_index: currentOrder }),
-      ]);
-      setBlockTypes((current) => current.map((item) => {
-        if (item.id === blockType.id) return { ...item, order_index: targetOrder };
-        if (item.id === target.id) return { ...item, order_index: currentOrder };
-        return item;
-      }));
+      await base44.entities.BlockType.update(
+        blockType.id,
+        {
+          order_index: targetOrder,
+        },
+      );
+
+      try {
+        await base44.entities.BlockType.update(
+          target.id,
+          {
+            order_index: currentOrder,
+          },
+        );
+      } catch (targetError) {
+        try {
+          await base44.entities.BlockType.update(
+            blockType.id,
+            {
+              order_index: currentOrder,
+            },
+          );
+        } catch {
+          // A lista será recarregada abaixo.
+        }
+
+        throw targetError;
+      }
+
+      setBlockTypes((current) => sortByOrderAndName(
+        current.map((item) => {
+          if (item.id === blockType.id) {
+            return {
+              ...item,
+              order_index: targetOrder,
+            };
+          }
+
+          if (item.id === target.id) {
+            return {
+              ...item,
+              order_index: currentOrder,
+            };
+          }
+
+          return item;
+        }),
+      ));
     } catch (error) {
       console.error('Erro ao reordenar:', error);
-      toast({ title: 'Não foi possível alterar a ordem', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível alterar a ordem',
+        description:
+          'A lista será atualizada para refletir o estado real.',
+        variant: 'destructive',
+      });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const requestDelete = (blockType) => {
-    const usage = usageByType[blockType.id] || {
-      presentationBlocks: 0,
-      templateBlocks: 0,
-      guidedQuestions: 0,
-    };
-
-    if (usage.presentationBlocks + usage.templateBlocks + usage.guidedQuestions > 0) {
-      toast({
-        title: 'Este tipo está em uso',
-        description: 'Desative o tipo em vez de excluí-lo para preservar apresentações, modelos e fluxos guiados.',
-        variant: 'destructive',
-      });
+    if (
+      !blockType?.id
+      || busyId
+      || actionLockRef.current
+    ) {
       return;
     }
 
@@ -604,22 +788,93 @@ export default function AdminBlockTypes() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setBusyId(deleteTarget.id);
+    const target = deleteTarget;
+
+    if (
+      !target?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyId(target.id);
 
     try {
-      await base44.entities.BlockType.delete(deleteTarget.id);
-      setBlockTypes((current) => current.filter((item) => item.id !== deleteTarget.id));
-      toast({ title: 'Tipo de bloco excluído' });
+      const [
+        currentPresentationBlocks,
+        currentTemplateBlocks,
+        currentQuestions,
+      ] = await Promise.all([
+        base44.entities.PresentationBlock.filter({
+          block_type_id: target.id,
+        }),
+        base44.entities.TemplateBlock.filter({
+          block_type_id: target.id,
+        }),
+        base44.entities.GuidedQuestion.filter({
+          block_type_id: target.id,
+        }),
+      ]);
+
+      const presentationUsage = uniqueById(
+        currentPresentationBlocks,
+      ).length;
+
+      const templateUsage = uniqueById(
+        currentTemplateBlocks,
+      ).length;
+
+      const questionUsage = uniqueById(
+        currentQuestions,
+      ).length;
+
+      if (
+        presentationUsage > 0
+        || templateUsage > 0
+        || questionUsage > 0
+      ) {
+        toast({
+          title: 'Este tipo está em uso',
+          description:
+            'Desative-o em vez de excluir para preservar apresentações, modelos e perguntas guiadas.',
+          variant: 'destructive',
+        });
+
+        setDeleteTarget(null);
+        return;
+      }
+
+      await base44.entities.BlockType.delete(
+        target.id,
+      );
+
+      setBlockTypes((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
+      toast({
+        title: 'Tipo de bloco excluído',
+      });
+
       setDeleteTarget(null);
     } catch (error) {
-      console.error('Erro ao excluir tipo de bloco:', error);
+      console.error(
+        'Erro ao excluir tipo de bloco:',
+        error,
+      );
+
       toast({
         title: 'Não foi possível excluir',
-        description: 'Verifique se o tipo ainda possui algum vínculo.',
+        description:
+          'Atualize a lista e tente novamente.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -649,15 +904,37 @@ export default function AdminBlockTypes() {
             type="button"
             variant="outline"
             onClick={() => {
+              if (
+                refreshing
+                || saving
+                || busyId
+                || loadLockRef.current
+              ) {
+                return;
+              }
+
               setRefreshing(true);
               loadData({ silent: true });
             }}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
-          <Button type="button" onClick={openCreate}>
+          <Button
+            type="button"
+            onClick={openCreate}
+            disabled={
+              saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />
             Novo tipo
           </Button>
