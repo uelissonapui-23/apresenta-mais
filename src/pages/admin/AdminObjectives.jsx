@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowDown,
@@ -78,6 +78,37 @@ const ICON_OPTIONS = [
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortByOrderAndName(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const orderDifference = (
+      normalizeNumber(left?.order_index)
+      - normalizeNumber(right?.order_index)
+    );
+
+    if (orderDifference !== 0) {
+      return orderDifference;
+    }
+
+    return String(left?.name || '').localeCompare(
+      String(right?.name || ''),
+      'pt-BR',
+      { sensitivity: 'base' },
+    );
+  });
 }
 
 function getIconComponent(iconName) {
@@ -252,7 +283,11 @@ function ObjectiveCard({
 
 export default function AdminObjectives() {
   const { toast } = useToast();
-  const { user, profile, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
 
   const [objectives, setObjectives] = useState([]);
   const [presentations, setPresentations] = useState([]);
@@ -270,16 +305,31 @@ export default function AdminObjectives() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const isAdmin = profile?.role === 'admin';
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (loadLockRef.current) {
+      return;
+    }
+
     if (!user?.id || !isAdmin) {
+      setObjectives([]);
+      setPresentations([]);
+      setTemplates([]);
+      setFlows([]);
+      setTips([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    if (!silent) setLoading(true);
+    loadLockRef.current = true;
+
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [objectiveRows, presentationRows, templateRows, flowRows, tipRows] = await Promise.all([
@@ -290,11 +340,11 @@ export default function AdminObjectives() {
         base44.entities.AppTip.list('-created_date'),
       ]);
 
-      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
-      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
-      setTemplates(Array.isArray(templateRows) ? templateRows : []);
-      setFlows(Array.isArray(flowRows) ? flowRows : []);
-      setTips(Array.isArray(tipRows) ? tipRows : []);
+      setObjectives(sortByOrderAndName(objectiveRows));
+      setPresentations(uniqueById(presentationRows));
+      setTemplates(uniqueById(templateRows));
+      setFlows(uniqueById(flowRows));
+      setTips(uniqueById(tipRows));
     } catch (error) {
       console.error('Erro ao carregar objetivos:', error);
       toast({
@@ -303,6 +353,7 @@ export default function AdminObjectives() {
         variant: 'destructive',
       });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -313,11 +364,7 @@ export default function AdminObjectives() {
   }, [loadData]);
 
   const sortedObjectives = useMemo(
-    () => [...objectives].sort((a, b) => {
-      const orderDifference = normalizeNumber(a.order_index, 0) - normalizeNumber(b.order_index, 0);
-      if (orderDifference !== 0) return orderDifference;
-      return String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR');
-    }),
+    () => sortByOrderAndName(objectives),
     [objectives],
   );
 
@@ -397,6 +444,13 @@ export default function AdminObjectives() {
   };
 
   const handleSave = async () => {
+    if (
+      saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
+
     const name = form.name.trim();
     const description = form.description.trim();
 
@@ -431,19 +485,53 @@ export default function AdminObjectives() {
       active: !!form.active,
     };
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
       if (editingObjective?.id) {
-        const updated = await base44.entities.PresentationObjective.update(editingObjective.id, payload);
-        setObjectives((current) => current.map((item) => (
-          item.id === editingObjective.id ? { ...item, ...payload, ...(updated || {}) } : item
-        )));
-        toast({ title: 'Objetivo atualizado', description: 'As alterações foram salvas.' });
+        const updated = await base44.entities.PresentationObjective.update(
+          editingObjective.id,
+          payload,
+        );
+
+        setObjectives((current) => sortByOrderAndName(
+          current.map((item) => (
+            item.id === editingObjective.id
+              ? {
+                  ...item,
+                  ...payload,
+                  ...(updated || {}),
+                }
+              : item
+          )),
+        ));
+
+        toast({
+          title: 'Objetivo atualizado',
+          description: 'As alterações foram salvas.',
+        });
       } else {
-        const created = await base44.entities.PresentationObjective.create(payload);
-        setObjectives((current) => [...current, created]);
-        toast({ title: 'Objetivo criado', description: 'Ele já pode ser usado no aplicativo.' });
+        const created = await base44.entities.PresentationObjective.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'O novo objetivo não retornou um ID válido.',
+          );
+        }
+
+        setObjectives((current) => sortByOrderAndName([
+          ...current,
+          created,
+        ]));
+
+        toast({
+          title: 'Objetivo criado',
+          description:
+            'Ele já pode ser usado no aplicativo.',
+        });
       }
 
       setDialogOpen(false);
@@ -457,67 +545,165 @@ export default function AdminObjectives() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (objective) => {
-    const nextValue = !objective.active;
+    if (
+      !objective?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(objective.id);
 
+    const nextValue = !objective.active;
+
     try {
-      await base44.entities.PresentationObjective.update(objective.id, { active: nextValue });
+      const updated = await base44.entities.PresentationObjective.update(
+        objective.id,
+        {
+          active: nextValue,
+        },
+      );
+
       setObjectives((current) => current.map((item) => (
-        item.id === objective.id ? { ...item, active: nextValue } : item
+        item.id === objective.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active: nextValue,
+            }
+          : item
       )));
+
       toast({
-        title: nextValue ? 'Objetivo ativado' : 'Objetivo desativado',
+        title: nextValue
+          ? 'Objetivo ativado'
+          : 'Objetivo desativado',
         description: nextValue
           ? 'Ele voltou a aparecer nas opções de criação.'
           : 'Apresentações existentes continuam preservadas.',
       });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
+
       toast({
         title: 'Não foi possível alterar o status',
         description: 'Tente novamente.',
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleMove = async (objective, direction) => {
-    const currentIndex = sortedObjectives.findIndex((item) => item.id === objective.id);
+    if (
+      !objective?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    const currentIndex = sortedObjectives.findIndex(
+      (item) => item.id === objective.id,
+    );
+
     const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedObjectives.length) return;
+
+    if (
+      currentIndex < 0
+      || targetIndex < 0
+      || targetIndex >= sortedObjectives.length
+    ) {
+      return;
+    }
 
     const target = sortedObjectives[targetIndex];
-    const currentOrder = normalizeNumber(objective.order_index, currentIndex + 1);
-    const targetOrder = normalizeNumber(target.order_index, targetIndex + 1);
 
+    const currentOrder = normalizeNumber(
+      objective.order_index,
+      currentIndex + 1,
+    );
+
+    const targetOrder = normalizeNumber(
+      target.order_index,
+      targetIndex + 1,
+    );
+
+    actionLockRef.current = true;
     setBusyId(objective.id);
 
     try {
-      await Promise.all([
-        base44.entities.PresentationObjective.update(objective.id, { order_index: targetOrder }),
-        base44.entities.PresentationObjective.update(target.id, { order_index: currentOrder }),
-      ]);
+      await base44.entities.PresentationObjective.update(
+        objective.id,
+        {
+          order_index: targetOrder,
+        },
+      );
 
-      setObjectives((current) => current.map((item) => {
-        if (item.id === objective.id) return { ...item, order_index: targetOrder };
-        if (item.id === target.id) return { ...item, order_index: currentOrder };
-        return item;
-      }));
+      try {
+        await base44.entities.PresentationObjective.update(
+          target.id,
+          {
+            order_index: currentOrder,
+          },
+        );
+      } catch (targetError) {
+        try {
+          await base44.entities.PresentationObjective.update(
+            objective.id,
+            {
+              order_index: currentOrder,
+            },
+          );
+        } catch {
+          // A lista será recarregada abaixo.
+        }
+
+        throw targetError;
+      }
+
+      setObjectives((current) => sortByOrderAndName(
+        current.map((item) => {
+          if (item.id === objective.id) {
+            return {
+              ...item,
+              order_index: targetOrder,
+            };
+          }
+
+          if (item.id === target.id) {
+            return {
+              ...item,
+              order_index: currentOrder,
+            };
+          }
+
+          return item;
+        }),
+      ));
     } catch (error) {
       console.error('Erro ao reordenar objetivo:', error);
+
       toast({
         title: 'Não foi possível alterar a ordem',
-        description: 'Tente novamente.',
+        description:
+          'A lista será atualizada para refletir o estado real.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -541,29 +727,115 @@ export default function AdminObjectives() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget?.id) return;
+    const target = deleteTarget;
 
-    const targetId = deleteTarget.id;
-    setBusyId(targetId);
+    if (
+      !target?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyId(target.id);
 
     try {
-      await base44.entities.PresentationObjective.delete(targetId);
-      setObjectives((current) => current.filter((item) => item.id !== targetId));
+      const [
+        currentPresentations,
+        currentTemplates,
+        currentFlows,
+        currentTips,
+      ] = await Promise.all([
+        base44.entities.Presentation.filter({
+          objective_id: target.id,
+        }),
+        base44.entities.PresentationTemplate.filter({
+          objective_id: target.id,
+        }),
+        base44.entities.GuidedFlow.filter({
+          objective_id: target.id,
+        }),
+        base44.entities.AppTip.filter({
+          objective_id: target.id,
+        }),
+      ]);
+
+      const presentationCount = uniqueById(
+        currentPresentations,
+      ).length;
+
+      const templateCount = uniqueById(
+        currentTemplates,
+      ).length;
+
+      const flowCount = uniqueById(
+        currentFlows,
+      ).length;
+
+      const tipCount = uniqueById(
+        currentTips,
+      ).length;
+
+      if (
+        presentationCount > 0
+        || templateCount > 0
+        || flowCount > 0
+        || tipCount > 0
+      ) {
+        toast({
+          title: 'Objetivo em uso',
+          description:
+            'Desative-o ou remova primeiro os vínculos com apresentações, modelos, fluxos e dicas.',
+          variant: 'destructive',
+        });
+
+        setDeleteTarget(null);
+        return;
+      }
+
+      await base44.entities.PresentationObjective.delete(
+        target.id,
+      );
+
+      setObjectives((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
+      toast({
+        title: 'Objetivo excluído',
+        description:
+          'O registro foi removido definitivamente.',
+      });
+
       setDeleteTarget(null);
-      toast({ title: 'Objetivo excluído', description: 'O registro foi removido definitivamente.' });
     } catch (error) {
       console.error('Erro ao excluir objetivo:', error);
+
       toast({
         title: 'Não foi possível excluir',
-        description: 'Confirme se o objetivo ainda possui algum vínculo.',
+        description:
+          'Atualize a lista e tente novamente.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || saving
+      || busyId
+      || loadLockRef.current
+    ) {
+      return;
+    }
+
     setRefreshing(true);
     await loadData({ silent: true });
   };
@@ -589,11 +861,29 @@ export default function AdminObjectives() {
         </div>
 
         <div className="flex w-full gap-2 sm:w-auto">
-          <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="flex-1 sm:flex-none">
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+            className="flex-1 sm:flex-none"
+          >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
-          <Button onClick={openCreateDialog} className="flex-1 sm:flex-none">
+          <Button
+            onClick={openCreateDialog}
+            className="flex-1 sm:flex-none"
+            disabled={
+              saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />
             Novo objetivo
           </Button>
