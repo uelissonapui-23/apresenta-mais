@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   ArrowDown,
@@ -93,6 +93,81 @@ function normalizeText(value) {
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortQuestions(rows, flowMap = {}) {
+  return uniqueById(rows).sort((left, right) => {
+    if (left.guided_flow_id !== right.guided_flow_id) {
+      return String(
+        flowMap[left.guided_flow_id]?.name || '',
+      ).localeCompare(
+        String(flowMap[right.guided_flow_id]?.name || ''),
+        'pt-BR',
+        { sensitivity: 'base' },
+      );
+    }
+
+    const orderDifference = (
+      normalizeNumber(left.order_index)
+      - normalizeNumber(right.order_index)
+    );
+
+    if (orderDifference !== 0) {
+      return orderDifference;
+    }
+
+    return String(left.id).localeCompare(String(right.id));
+  });
+}
+
+function buildUniqueCopyText(baseText, questions, flowId) {
+  const base = String(baseText || 'Pergunta').trim() || 'Pergunta';
+
+  const texts = new Set(
+    uniqueById(questions)
+      .filter((question) => question.guided_flow_id === flowId)
+      .map((question) => (
+        String(question.question_text || '')
+          .trim()
+          .toLowerCase()
+      )),
+  );
+
+  let attempt = 1;
+  let candidate = `${base} (cópia)`;
+
+  while (texts.has(candidate.toLowerCase())) {
+    attempt += 1;
+    candidate = `${base} (cópia ${attempt})`;
+  }
+
+  return candidate;
+}
+
+function getConditionalQuestionId(rule) {
+  if (!rule || typeof rule !== 'object') {
+    return '';
+  }
+
+  return String(
+    rule.question_id
+    || rule.questionId
+    || rule.field
+    || rule.depends_on
+    || '',
+  ).trim();
 }
 
 function parseOptions(value) {
@@ -287,7 +362,11 @@ function QuestionCard({
 export default function AdminQuestions() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedFlowFromUrl = searchParams.get('flow') || 'all';
-  const { profile, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
   const { toast } = useToast();
 
   const [questions, setQuestions] = useState([]);
@@ -305,32 +384,64 @@ export default function AdminQuestions() {
   const [form, setForm] = useState(DEFAULT_FORM);
   const [saving, setSaving] = useState(false);
 
-  const isAdmin = profile?.role === 'admin';
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
-    if (!isAdmin) {
+    if (loadLockRef.current) {
+      return;
+    }
+
+    if (!user?.id || !isAdmin) {
+      setQuestions([]);
+      setFlows([]);
+      setBlockTypes([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
-    if (!silent) setLoading(true);
+
+    loadLockRef.current = true;
+
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const [questionRows, flowRows, blockTypeRows] = await Promise.all([
         base44.entities.GuidedQuestion.list('order_index'),
         base44.entities.GuidedFlow.list('name'),
         base44.entities.BlockType.list('order_index'),
       ]);
-      setQuestions(Array.isArray(questionRows) ? questionRows : []);
-      setFlows(Array.isArray(flowRows) ? flowRows : []);
-      setBlockTypes(Array.isArray(blockTypeRows) ? blockTypeRows : []);
+      const normalizedFlows = uniqueById(flowRows);
+      const validFlowIds = new Set(
+        normalizedFlows.map((flow) => flow.id),
+      );
+
+      setFlows(normalizedFlows);
+
+      setQuestions(
+        uniqueById(questionRows).filter(
+          (question) => validFlowIds.has(
+            question.guided_flow_id,
+          ),
+        ),
+      );
+
+      setBlockTypes(
+        uniqueById(blockTypeRows).filter(
+          (type) => type.active !== false,
+        ),
+      );
     } catch (error) {
       console.error('Erro ao carregar perguntas guiadas:', error);
       toast({ title: 'Erro ao carregar perguntas', description: 'Tente novamente.', variant: 'destructive' });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [isAdmin, toast]);
+  }, [isAdmin, toast, user?.id]);
 
   useEffect(() => {
     if (!userLoading) loadData();
@@ -373,6 +484,13 @@ export default function AdminQuestions() {
   }, [questions]);
 
   const openCreate = () => {
+    if (
+      saving
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
     const flowId = selectedFlowFromUrl !== 'all' ? selectedFlowFromUrl : flows[0]?.id || '';
     setEditing(null);
     setForm({ ...DEFAULT_FORM, guided_flow_id: flowId, order_index: nextOrderForFlow(flowId) });
@@ -380,6 +498,14 @@ export default function AdminQuestions() {
   };
 
   const openEdit = (question) => {
+    if (
+      !question?.id
+      || saving
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
     setEditing(question);
     setForm({
       guided_flow_id: question.guided_flow_id || '',
@@ -400,14 +526,84 @@ export default function AdminQuestions() {
   const updateForm = (key, value) => setForm((current) => ({ ...current, [key]: value }));
 
   const validateForm = () => {
-    if (!form.guided_flow_id) return 'Escolha um fluxo guiado.';
-    if (!normalizeText(form.question_text)) return 'Digite o texto da pergunta.';
-    if (['select', 'multiselect'].includes(form.field_type) && parseOptions(form.options_text).length < 2) {
+    const selectedFlow = flows.find(
+      (flow) => (
+        flow.id === form.guided_flow_id
+        && flow.active !== false
+      ),
+    );
+
+    if (!selectedFlow) {
+      return 'Escolha um fluxo guiado ativo.';
+    }
+
+    if (!normalizeText(form.question_text)) {
+      return 'Digite o texto da pergunta.';
+    }
+
+    if (!FIELD_TYPES.some(
+      (type) => type.value === form.field_type,
+    )) {
+      return 'Escolha um tipo de resposta válido.';
+    }
+
+    if (
+      ['select', 'multiselect'].includes(form.field_type)
+      && parseOptions(form.options_text).length < 2
+    ) {
       return 'Cadastre pelo menos duas opções para esse tipo de resposta.';
     }
-    if (normalizeText(form.conditional_rule_text) && !parseConditionalRule(form.conditional_rule_text)) {
-      return 'A regra condicional precisa ser um JSON válido.';
+
+    if (form.block_type_to_generate) {
+      const validBlockType = blockTypes.some(
+        (type) => (
+          type.active !== false
+          && (
+            type.id === form.block_type_to_generate
+            || type.code === form.block_type_to_generate
+          )
+        ),
+      );
+
+      if (!validBlockType) {
+        return 'Escolha um tipo de bloco ativo.';
+      }
     }
+
+    const conditionalText = normalizeText(
+      form.conditional_rule_text,
+    );
+
+    if (conditionalText) {
+      const rule = parseConditionalRule(conditionalText);
+
+      if (!rule) {
+        return 'A regra condicional precisa ser um JSON válido.';
+      }
+
+      const dependencyId = getConditionalQuestionId(rule);
+
+      if (!dependencyId) {
+        return 'A regra condicional precisa informar a pergunta de referência.';
+      }
+
+      if (editing?.id && dependencyId === editing.id) {
+        return 'Uma pergunta não pode depender dela mesma.';
+      }
+
+      const dependency = questions.find(
+        (question) => question.id === dependencyId,
+      );
+
+      if (!dependency) {
+        return 'A pergunta usada na regra condicional não foi encontrada.';
+      }
+
+      if (dependency.guided_flow_id !== form.guided_flow_id) {
+        return 'A regra condicional deve usar uma pergunta do mesmo fluxo.';
+      }
+    }
+
     return '';
   };
 
@@ -428,22 +624,61 @@ export default function AdminQuestions() {
   });
 
   const handleSave = async () => {
+    if (
+      saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
+
     const validationError = validateForm();
     if (validationError) {
       toast({ title: 'Revise a pergunta', description: validationError, variant: 'destructive' });
       return;
     }
+    saveLockRef.current = true;
     setSaving(true);
+
     try {
       const payload = buildPayload();
       if (editing) {
-        const updated = await base44.entities.GuidedQuestion.update(editing.id, payload);
-        setQuestions((current) => current.map((item) => item.id === editing.id ? { ...item, ...updated, ...payload } : item));
-        toast({ title: 'Pergunta atualizada' });
+        const updated = await base44.entities.GuidedQuestion.update(
+          editing.id,
+          payload,
+        );
+
+        setQuestions((current) => current.map((item) => (
+          item.id === editing.id
+            ? {
+                ...item,
+                ...payload,
+                ...(updated || {}),
+              }
+            : item
+        )));
+
+        toast({
+          title: 'Pergunta atualizada',
+        });
       } else {
-        const created = await base44.entities.GuidedQuestion.create(payload);
-        setQuestions((current) => [...current, created]);
-        toast({ title: 'Pergunta criada' });
+        const created = await base44.entities.GuidedQuestion.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'A nova pergunta não retornou um ID válido.',
+          );
+        }
+
+        setQuestions((current) => [
+          ...current,
+          created,
+        ]);
+
+        toast({
+          title: 'Pergunta criada',
+        });
       }
       setDialogOpen(false);
       setEditing(null);
@@ -451,92 +686,370 @@ export default function AdminQuestions() {
       console.error('Erro ao salvar pergunta:', error);
       toast({ title: 'Não foi possível salvar', description: 'Verifique os dados e tente novamente.', variant: 'destructive' });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleDuplicate = async (question) => {
+    if (
+      !question?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(question.id);
+
     try {
+      const originalRule = parseConditionalRule(
+        question.conditional_rule_json,
+      );
+
+      const dependencyId = getConditionalQuestionId(
+        originalRule,
+      );
+
+      const conditionalRule = (
+        dependencyId === question.id
+          ? ''
+          : question.conditional_rule_json || ''
+      );
+
       const payload = {
         guided_flow_id: question.guided_flow_id,
-        question_text: `${question.question_text} (cópia)`,
+        question_text: buildUniqueCopyText(
+          question.question_text,
+          questions,
+          question.guided_flow_id,
+        ),
         help_text: question.help_text || '',
         field_type: question.field_type || 'textarea',
         options_json: question.options_json || '',
         required: Boolean(question.required),
-        order_index: nextOrderForFlow(question.guided_flow_id),
-        destination_field: question.destination_field || '',
-        block_type_to_generate: question.block_type_to_generate || '',
-        conditional_rule_json: question.conditional_rule_json || '',
+        order_index: nextOrderForFlow(
+          question.guided_flow_id,
+        ),
+        destination_field:
+          question.destination_field || '',
+        block_type_to_generate:
+          question.block_type_to_generate || '',
+        conditional_rule_json: conditionalRule,
         active: false,
       };
-      const created = await base44.entities.GuidedQuestion.create(payload);
-      setQuestions((current) => [...current, created]);
-      toast({ title: 'Pergunta duplicada', description: 'A cópia foi criada inativa para revisão.' });
+
+      const created = await base44.entities.GuidedQuestion.create(
+        payload,
+      );
+
+      if (!created?.id) {
+        throw new Error(
+          'A cópia não retornou um ID válido.',
+        );
+      }
+
+      setQuestions((current) => [
+        ...current,
+        created,
+      ]);
+
+      toast({
+        title: 'Pergunta duplicada',
+        description:
+          dependencyId === question.id
+            ? 'A cópia foi criada inativa e a autorreferência condicional foi removida.'
+            : 'A cópia foi criada inativa para revisão.',
+      });
     } catch (error) {
-      console.error('Erro ao duplicar pergunta:', error);
-      toast({ title: 'Não foi possível duplicar', variant: 'destructive' });
+      console.error(
+        'Erro ao duplicar pergunta:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível duplicar',
+        description:
+          error.message
+          || 'Tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleToggleActive = async (question) => {
+    if (
+      !question?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(question.id);
+
+    const active = !question.active;
+
     try {
-      const active = !question.active;
-      await base44.entities.GuidedQuestion.update(question.id, { active });
-      setQuestions((current) => current.map((item) => item.id === question.id ? { ...item, active } : item));
-      toast({ title: active ? 'Pergunta ativada' : 'Pergunta desativada' });
+      const updated = await base44.entities.GuidedQuestion.update(
+        question.id,
+        { active },
+      );
+
+      setQuestions((current) => current.map((item) => (
+        item.id === question.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active,
+            }
+          : item
+      )));
+
+      toast({
+        title: active
+          ? 'Pergunta ativada'
+          : 'Pergunta desativada',
+      });
     } catch (error) {
-      console.error('Erro ao alterar status:', error);
-      toast({ title: 'Não foi possível alterar o status', variant: 'destructive' });
+      console.error(
+        'Erro ao alterar status:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível alterar o status',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleMove = async (question, direction) => {
+    if (
+      !question?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
     const sameFlow = questions
-      .filter((item) => item.guided_flow_id === question.guided_flow_id)
-      .sort((a, b) => normalizeNumber(a.order_index) - normalizeNumber(b.order_index));
-    const currentIndex = sameFlow.findIndex((item) => item.id === question.id);
-    const target = sameFlow[currentIndex + direction];
-    if (!target) return;
+      .filter(
+        (item) => (
+          item.guided_flow_id
+          === question.guided_flow_id
+        ),
+      )
+      .sort((left, right) => (
+        normalizeNumber(left.order_index)
+        - normalizeNumber(right.order_index)
+        || String(left.id).localeCompare(String(right.id))
+      ));
+
+    const currentIndex = sameFlow.findIndex(
+      (item) => item.id === question.id,
+    );
+
+    const target = sameFlow[
+      currentIndex + direction
+    ];
+
+    if (!target) {
+      return;
+    }
+
+    const currentOrder = normalizeNumber(
+      question.order_index,
+    );
+
+    const targetOrder = normalizeNumber(
+      target.order_index,
+    );
+
+    actionLockRef.current = true;
     setBusyId(question.id);
+
     try {
-      const currentOrder = normalizeNumber(question.order_index);
-      const targetOrder = normalizeNumber(target.order_index);
-      await Promise.all([
-        base44.entities.GuidedQuestion.update(question.id, { order_index: targetOrder }),
-        base44.entities.GuidedQuestion.update(target.id, { order_index: currentOrder }),
-      ]);
+      await base44.entities.GuidedQuestion.update(
+        question.id,
+        {
+          order_index: targetOrder,
+        },
+      );
+
+      try {
+        await base44.entities.GuidedQuestion.update(
+          target.id,
+          {
+            order_index: currentOrder,
+          },
+        );
+      } catch (targetError) {
+        try {
+          await base44.entities.GuidedQuestion.update(
+            question.id,
+            {
+              order_index: currentOrder,
+            },
+          );
+        } catch {
+          // A lista será recarregada abaixo.
+        }
+
+        throw targetError;
+      }
+
       setQuestions((current) => current.map((item) => {
-        if (item.id === question.id) return { ...item, order_index: targetOrder };
-        if (item.id === target.id) return { ...item, order_index: currentOrder };
+        if (item.id === question.id) {
+          return {
+            ...item,
+            order_index: targetOrder,
+          };
+        }
+
+        if (item.id === target.id) {
+          return {
+            ...item,
+            order_index: currentOrder,
+          };
+        }
+
         return item;
       }));
     } catch (error) {
-      console.error('Erro ao reordenar perguntas:', error);
-      toast({ title: 'Não foi possível alterar a ordem', variant: 'destructive' });
+      console.error(
+        'Erro ao reordenar perguntas:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível alterar a ordem',
+        description:
+          'A lista será atualizada para refletir o estado real.',
+        variant: 'destructive',
+      });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setBusyId(deleteTarget.id);
+    const target = deleteTarget;
+
+    if (
+      !target?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyId(target.id);
+
     try {
-      await base44.entities.GuidedQuestion.delete(deleteTarget.id);
-      setQuestions((current) => current.filter((item) => item.id !== deleteTarget.id));
-      toast({ title: 'Pergunta excluída' });
+      const [
+        answerRows,
+        currentQuestions,
+      ] = await Promise.all([
+        base44.entities.GuidedAnswer.filter({
+          guided_question_id: target.id,
+        }),
+        base44.entities.GuidedQuestion.list(
+          'order_index',
+        ),
+      ]);
+
+      const answerCount = uniqueById(
+        answerRows,
+      ).length;
+
+      const dependentQuestions = uniqueById(
+        currentQuestions,
+      ).filter((question) => {
+        if (question.id === target.id) {
+          return false;
+        }
+
+        const rule = parseConditionalRule(
+          question.conditional_rule_json,
+        );
+
+        return (
+          getConditionalQuestionId(rule)
+          === target.id
+        );
+      });
+
+      if (
+        answerCount > 0
+        || dependentQuestions.length > 0
+      ) {
+        const reasons = [];
+
+        if (answerCount > 0) {
+          reasons.push(
+            `${answerCount} resposta${answerCount === 1 ? '' : 's'} histórica${answerCount === 1 ? '' : 's'}`,
+          );
+        }
+
+        if (dependentQuestions.length > 0) {
+          reasons.push(
+            `${dependentQuestions.length} pergunta${dependentQuestions.length === 1 ? '' : 's'} dependente${dependentQuestions.length === 1 ? '' : 's'}`,
+          );
+        }
+
+        toast({
+          title: 'Pergunta em uso',
+          description:
+            `Desative-a em vez de excluir. Foram encontrados ${reasons.join(' e ')}.`,
+          variant: 'destructive',
+        });
+
+        setDeleteTarget(null);
+        return;
+      }
+
+      await base44.entities.GuidedQuestion.delete(
+        target.id,
+      );
+
+      setQuestions((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
+      toast({
+        title: 'Pergunta excluída',
+      });
+
       setDeleteTarget(null);
     } catch (error) {
-      console.error('Erro ao excluir pergunta:', error);
-      toast({ title: 'Não foi possível excluir', variant: 'destructive' });
+      console.error(
+        'Erro ao excluir pergunta:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível excluir',
+        description:
+          'Atualize a lista e tente novamente.',
+        variant: 'destructive',
+      });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -575,10 +1088,39 @@ export default function AdminQuestions() {
           </div>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={() => { setRefreshing(true); loadData({ silent: true }); }} disabled={refreshing}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (
+                refreshing
+                || saving
+                || busyId
+                || loadLockRef.current
+              ) {
+                return;
+              }
+
+              setRefreshing(true);
+              loadData({ silent: true });
+            }}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />Atualizar
           </Button>
-          <Button onClick={openCreate} disabled={!flows.length}>
+          <Button
+            onClick={openCreate}
+            disabled={
+              !flows.length
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />Nova pergunta
           </Button>
         </div>
@@ -687,7 +1229,16 @@ export default function AdminQuestions() {
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          if (!open && saving) {
+            return;
+          }
+
+          setDialogOpen(open);
+        }}
+      >
         <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editing ? 'Editar pergunta' : 'Nova pergunta guiada'}</DialogTitle>
@@ -793,7 +1344,11 @@ export default function AdminQuestions() {
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open && !busyId) {
+            setDeleteTarget(null);
+          }
+        }}
         title="Excluir pergunta guiada?"
         description="A pergunta será removida do fluxo. Respostas antigas já salvas não serão apagadas automaticamente."
         confirmLabel="Excluir pergunta"
