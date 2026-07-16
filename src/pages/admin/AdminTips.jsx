@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -109,6 +109,67 @@ function getTriggerLabel(value) {
   return TRIGGER_TYPES.find((item) => item.value === value)?.label || value || 'Sem gatilho';
 }
 
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function getRecordTimestamp(record) {
+  const value = (
+    record?.updated_date
+    || record?.updated_at
+    || record?.created_date
+    || record?.created_at
+    || ''
+  );
+
+  const timestamp = new Date(value).getTime();
+
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortNewestFirst(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const timeDifference = (
+      getRecordTimestamp(right)
+      - getRecordTimestamp(left)
+    );
+
+    if (timeDifference !== 0) {
+      return timeDifference;
+    }
+
+    return String(right.id).localeCompare(String(left.id));
+  });
+}
+
+function buildUniqueCopyTitle(baseTitle, tips) {
+  const base = normalizeText(baseTitle) || 'Dica';
+
+  const titles = new Set(
+    uniqueById(tips).map((tip) => (
+      normalizeText(tip.title).toLowerCase()
+    )),
+  );
+
+  let attempt = 1;
+  let candidate = `${base} (cópia)`;
+
+  while (titles.has(candidate.toLowerCase())) {
+    attempt += 1;
+    candidate = `${base} (cópia ${attempt})`;
+  }
+
+  return candidate;
+}
+
 function LoadingState() {
   return (
     <div className="flex min-h-[55vh] items-center justify-center px-4">
@@ -169,7 +230,11 @@ function ContextBadge({ label, value }) {
 
 export default function AdminTips() {
   const { toast } = useToast();
-  const { user, profile, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
 
   const [tips, setTips] = useState([]);
   const [types, setTypes] = useState([]);
@@ -195,16 +260,30 @@ export default function AdminTips() {
   const [formErrors, setFormErrors] = useState({});
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const isAdmin = profile?.role === 'admin';
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (loadLockRef.current) {
+      return;
+    }
+
     if (!user?.id || !isAdmin) {
+      setTips([]);
+      setTypes([]);
+      setObjectives([]);
+      setStyles([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    if (!silent) setLoading(true);
+    loadLockRef.current = true;
+
+    if (!silent) {
+      setLoading(true);
+    }
     setLoadError('');
 
     try {
@@ -215,10 +294,22 @@ export default function AdminTips() {
         base44.entities.CommunicationStyle.filter({ active: true }, 'order_index'),
       ]);
 
-      setTips(Array.isArray(tipRows) ? tipRows : []);
-      setTypes(Array.isArray(typeRows) ? typeRows : []);
-      setObjectives(Array.isArray(objectiveRows) ? objectiveRows : []);
-      setStyles(Array.isArray(styleRows) ? styleRows : []);
+      setTips(sortNewestFirst(tipRows));
+      setTypes(
+        uniqueById(typeRows).filter(
+          (item) => item.active !== false,
+        ),
+      );
+      setObjectives(
+        uniqueById(objectiveRows).filter(
+          (item) => item.active !== false,
+        ),
+      );
+      setStyles(
+        uniqueById(styleRows).filter(
+          (item) => item.active !== false,
+        ),
+      );
     } catch (error) {
       console.error('Erro ao carregar dicas:', error);
       setLoadError('Não foi possível carregar as dicas administrativas.');
@@ -228,6 +319,7 @@ export default function AdminTips() {
         variant: 'destructive',
       });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -322,6 +414,13 @@ export default function AdminTips() {
   };
 
   const openCreate = () => {
+    if (
+      saving
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
     setEditingTip(null);
     setForm(DEFAULT_FORM);
     setFormErrors({});
@@ -329,6 +428,14 @@ export default function AdminTips() {
   };
 
   const openEdit = (tip) => {
+    if (
+      !tip?.id
+      || saving
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
     setEditingTip(tip);
     setForm({
       presentation_type_id: tip.presentation_type_id || '',
@@ -351,7 +458,41 @@ export default function AdminTips() {
 
     if (!title) errors.title = 'Informe um título.';
     if (!message) errors.message = 'Informe a mensagem da dica.';
-    if (!form.trigger_type) errors.trigger_type = 'Escolha quando a dica será exibida.';
+    if (!TRIGGER_TYPES.some(
+      (item) => item.value === form.trigger_type,
+    )) {
+      errors.trigger_type = 'Escolha um gatilho válido.';
+    }
+
+    if (
+      form.presentation_type_id
+      && !types.some(
+        (item) => item.id === form.presentation_type_id,
+      )
+    ) {
+      errors.presentation_type_id =
+        'O tipo selecionado não está mais disponível.';
+    }
+
+    if (
+      form.objective_id
+      && !objectives.some(
+        (item) => item.id === form.objective_id,
+      )
+    ) {
+      errors.objective_id =
+        'O objetivo selecionado não está mais disponível.';
+    }
+
+    if (
+      form.communication_style_id
+      && !styles.some(
+        (item) => item.id === form.communication_style_id,
+      )
+    ) {
+      errors.communication_style_id =
+        'O estilo selecionado não está mais disponível.';
+    }
 
     const duplicate = tips.some((tip) => (
       tip.id !== editingTip?.id
@@ -393,23 +534,63 @@ export default function AdminTips() {
   };
 
   const handleSave = async () => {
-    if (saving || !validateForm()) return;
+    if (
+      saving
+      || saveLockRef.current
+      || !validateForm()
+    ) {
+      return;
+    }
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
       const payload = buildPayload();
 
       if (editingTip?.id) {
-        const updated = await base44.entities.AppTip.update(editingTip.id, payload);
-        setTips((current) => current.map((item) => (
-          item.id === editingTip.id ? { ...item, ...payload, ...updated } : item
-        )));
-        toast({ title: 'Dica atualizada', description: 'As alterações foram salvas.' });
+        const updated = await base44.entities.AppTip.update(
+          editingTip.id,
+          payload,
+        );
+
+        setTips((current) => sortNewestFirst(
+          current.map((item) => (
+            item.id === editingTip.id
+              ? {
+                  ...item,
+                  ...payload,
+                  ...(updated || {}),
+                }
+              : item
+          )),
+        ));
+
+        toast({
+          title: 'Dica atualizada',
+          description: 'As alterações foram salvas.',
+        });
       } else {
-        const created = await base44.entities.AppTip.create(payload);
-        setTips((current) => [created, ...current]);
-        toast({ title: 'Dica criada', description: 'Ela já pode ser usada pelo aplicativo.' });
+        const created = await base44.entities.AppTip.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'A nova dica não retornou um ID válido.',
+          );
+        }
+
+        setTips((current) => sortNewestFirst([
+          created,
+          ...current,
+        ]));
+
+        toast({
+          title: 'Dica criada',
+          description:
+            'Ela já pode ser usada pelo aplicativo.',
+        });
       }
 
       setDialogOpen(false);
@@ -423,100 +604,222 @@ export default function AdminTips() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const toggleActive = async (tip) => {
-    if (!tip?.id || busyId) return;
+    if (
+      !tip?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyId(tip.id);
 
     const nextValue = !tip.active;
-    setBusyId(tip.id);
-    setTips((current) => current.map((item) => (
-      item.id === tip.id ? { ...item, active: nextValue } : item
-    )));
 
     try {
-      await base44.entities.AppTip.update(tip.id, { active: nextValue });
+      const updated = await base44.entities.AppTip.update(
+        tip.id,
+        {
+          active: nextValue,
+        },
+      );
+
+      setTips((current) => current.map((item) => (
+        item.id === tip.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active: nextValue,
+            }
+          : item
+      )));
+
       toast({
-        title: nextValue ? 'Dica ativada' : 'Dica desativada',
+        title: nextValue
+          ? 'Dica ativada'
+          : 'Dica desativada',
         description: nextValue
           ? 'Ela poderá aparecer nos contextos configurados.'
           : 'Ela foi preservada, mas não será exibida.',
       });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
-      setTips((current) => current.map((item) => (
-        item.id === tip.id ? { ...item, active: !nextValue } : item
-      )));
-      toast({ title: 'Falha ao alterar status', variant: 'destructive' });
+
+      toast({
+        title: 'Falha ao alterar status',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const duplicateTip = async (tip) => {
-    if (!tip?.id || busyId) return;
+    if (
+      !tip?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
 
+    actionLockRef.current = true;
     setBusyId(tip.id);
 
     try {
-      const baseTitle = `${normalizeText(tip.title)} (cópia)`;
-      let title = baseTitle;
-      let suffix = 2;
-
-      while (tips.some((item) => normalizeText(item.title).toLowerCase() === title.toLowerCase())) {
-        title = `${baseTitle} ${suffix}`;
-        suffix += 1;
-      }
-
       const created = await base44.entities.AppTip.create({
-        presentation_type_id: tip.presentation_type_id || null,
-        objective_id: tip.objective_id || null,
-        communication_style_id: tip.communication_style_id || null,
-        title,
+        presentation_type_id:
+          types.some(
+            (item) => item.id === tip.presentation_type_id,
+          )
+            ? tip.presentation_type_id
+            : null,
+        objective_id:
+          objectives.some(
+            (item) => item.id === tip.objective_id,
+          )
+            ? tip.objective_id
+            : null,
+        communication_style_id:
+          styles.some(
+            (item) => item.id === tip.communication_style_id,
+          )
+            ? tip.communication_style_id
+            : null,
+        title: buildUniqueCopyTitle(
+          tip.title,
+          tips,
+        ),
         message: tip.message || '',
-        trigger_type: tip.trigger_type || 'editor_open',
-        rule_json: tip.rule_json || null,
+        trigger_type: TRIGGER_TYPES.some(
+          (item) => item.value === tip.trigger_type,
+        )
+          ? tip.trigger_type
+          : 'editor_open',
+        rule_json:
+          safeJsonParse(tip.rule_json) === undefined
+            ? null
+            : tip.rule_json || null,
         active: false,
       });
 
-      setTips((current) => [created, ...current]);
+      if (!created?.id) {
+        throw new Error(
+          'A cópia não retornou um ID válido.',
+        );
+      }
+
+      setTips((current) => sortNewestFirst([
+        created,
+        ...current,
+      ]));
+
       toast({
         title: 'Dica duplicada',
-        description: 'A cópia foi criada inativa para revisão.',
+        description:
+          'A cópia foi criada inativa para revisão.',
       });
     } catch (error) {
       console.error('Erro ao duplicar dica:', error);
-      toast({ title: 'Não foi possível duplicar', variant: 'destructive' });
+
+      toast({
+        title: 'Não foi possível duplicar',
+        description:
+          error.message
+          || 'Tente novamente.',
+        variant: 'destructive',
+      });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget?.id || busyId) return;
+    const target = deleteTarget;
 
-    setBusyId(deleteTarget.id);
+    if (
+      !target?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyId(target.id);
 
     try {
-      await base44.entities.AppTip.delete(deleteTarget.id);
-      setTips((current) => current.filter((item) => item.id !== deleteTarget.id));
-      toast({ title: 'Dica excluída', description: 'O registro foi removido definitivamente.' });
+      const currentRows = uniqueById(
+        await base44.entities.AppTip.filter({
+          id: target.id,
+        }),
+      );
+
+      if (!currentRows.some((item) => item.id === target.id)) {
+        setTips((current) => current.filter(
+          (item) => item.id !== target.id,
+        ));
+        setDeleteTarget(null);
+
+        toast({
+          title: 'Dica já removida',
+          description:
+            'A lista foi atualizada.',
+        });
+        return;
+      }
+
+      await base44.entities.AppTip.delete(
+        target.id,
+      );
+
+      setTips((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
+      toast({
+        title: 'Dica excluída',
+        description:
+          'O registro foi removido definitivamente.',
+      });
+
       setDeleteTarget(null);
     } catch (error) {
       console.error('Erro ao excluir dica:', error);
+
       toast({
         title: 'Não foi possível excluir',
-        description: 'Tente novamente em alguns instantes.',
+        description:
+          'Atualize a lista e tente novamente.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || saving
+      || busyId
+      || loadLockRef.current
+    ) {
+      return;
+    }
+
     setRefreshing(true);
     await loadData({ silent: true });
   };
@@ -553,13 +856,26 @@ export default function AdminTips() {
           <Button
             variant="outline"
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
             className="w-full sm:w-auto"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
-          <Button onClick={openCreate} className="w-full sm:w-auto">
+          <Button
+            onClick={openCreate}
+            className="w-full sm:w-auto"
+            disabled={
+              saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />
             Nova dica
           </Button>
@@ -570,7 +886,19 @@ export default function AdminTips() {
         <Card className="border-destructive/30 bg-destructive/5">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-destructive">{loadError}</p>
-            <Button variant="outline" size="sm" onClick={handleRefresh}>Tentar novamente</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={
+                refreshing
+                || saving
+                || Boolean(busyId)
+                || loadLockRef.current
+              }
+            >
+              Tentar novamente
+            </Button>
           </CardContent>
         </Card>
       )}
@@ -863,6 +1191,11 @@ export default function AdminTips() {
                       {types.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {formErrors.presentation_type_id && (
+                    <p className="text-xs text-destructive">
+                      {formErrors.presentation_type_id}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -880,6 +1213,11 @@ export default function AdminTips() {
                       {objectives.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {formErrors.objective_id && (
+                    <p className="text-xs text-destructive">
+                      {formErrors.objective_id}
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -897,6 +1235,11 @@ export default function AdminTips() {
                       {styles.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
+                  {formErrors.communication_style_id && (
+                    <p className="text-xs text-destructive">
+                      {formErrors.communication_style_id}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
