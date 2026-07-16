@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowDown,
@@ -83,6 +83,37 @@ const ICON_OPTIONS = [
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortByOrderAndName(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const orderDifference = (
+      normalizeNumber(left?.order_index)
+      - normalizeNumber(right?.order_index)
+    );
+
+    if (orderDifference !== 0) {
+      return orderDifference;
+    }
+
+    return String(left?.name || '').localeCompare(
+      String(right?.name || ''),
+      'pt-BR',
+      { sensitivity: 'base' },
+    );
+  });
 }
 
 function getIconComponent(iconName) {
@@ -288,7 +319,11 @@ function TypeCard({
 
 export default function AdminTypes() {
   const { toast } = useToast();
-  const { user, profile, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
 
   const [types, setTypes] = useState([]);
   const [presentations, setPresentations] = useState([]);
@@ -305,16 +340,30 @@ export default function AdminTypes() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const isAdmin = profile?.role === 'admin';
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (loadLockRef.current) {
+      return;
+    }
+
     if (!user?.id || !isAdmin) {
+      setTypes([]);
+      setPresentations([]);
+      setTemplates([]);
+      setFlows([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    if (!silent) setLoading(true);
+    loadLockRef.current = true;
+
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [typeRows, presentationRows, templateRows, flowRows] = await Promise.all([
@@ -324,10 +373,10 @@ export default function AdminTypes() {
         base44.entities.GuidedFlow.list('name'),
       ]);
 
-      setTypes(Array.isArray(typeRows) ? typeRows : []);
-      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
-      setTemplates(Array.isArray(templateRows) ? templateRows : []);
-      setFlows(Array.isArray(flowRows) ? flowRows : []);
+      setTypes(sortByOrderAndName(typeRows));
+      setPresentations(uniqueById(presentationRows));
+      setTemplates(uniqueById(templateRows));
+      setFlows(uniqueById(flowRows));
     } catch (error) {
       console.error('Erro ao carregar tipos:', error);
       toast({
@@ -336,6 +385,7 @@ export default function AdminTypes() {
         variant: 'destructive',
       });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -346,11 +396,7 @@ export default function AdminTypes() {
   }, [loadData]);
 
   const sortedTypes = useMemo(
-    () => [...types].sort((a, b) => {
-      const orderDifference = normalizeNumber(a.order_index, 0) - normalizeNumber(b.order_index, 0);
-      if (orderDifference !== 0) return orderDifference;
-      return String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR');
-    }),
+    () => sortByOrderAndName(types),
     [types],
   );
 
@@ -433,6 +479,12 @@ export default function AdminTypes() {
   };
 
   const handleSave = async () => {
+    if (
+      saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
     const name = form.name.trim();
     const description = form.description.trim();
     const color = form.color.trim();
@@ -478,19 +530,53 @@ export default function AdminTypes() {
       active: !!form.active,
     };
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
       if (editingType?.id) {
-        const updated = await base44.entities.PresentationType.update(editingType.id, payload);
-        setTypes((current) => current.map((item) => (
-          item.id === editingType.id ? { ...item, ...payload, ...(updated || {}) } : item
-        )));
-        toast({ title: 'Tipo atualizado', description: 'As alterações foram salvas.' });
+        const updated = await base44.entities.PresentationType.update(
+          editingType.id,
+          payload,
+        );
+
+        setTypes((current) => sortByOrderAndName(
+          current.map((item) => (
+            item.id === editingType.id
+              ? {
+                  ...item,
+                  ...payload,
+                  ...(updated || {}),
+                }
+              : item
+          )),
+        ));
+
+        toast({
+          title: 'Tipo atualizado',
+          description: 'As alterações foram salvas.',
+        });
       } else {
-        const created = await base44.entities.PresentationType.create(payload);
-        setTypes((current) => [...current, created]);
-        toast({ title: 'Tipo criado', description: 'O novo tipo já pode ser usado no aplicativo.' });
+        const created = await base44.entities.PresentationType.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'O novo tipo não retornou um ID válido.',
+          );
+        }
+
+        setTypes((current) => sortByOrderAndName([
+          ...current,
+          created,
+        ]));
+
+        toast({
+          title: 'Tipo criado',
+          description:
+            'O novo tipo já pode ser usado no aplicativo.',
+        });
       }
 
       setDialogOpen(false);
@@ -504,68 +590,165 @@ export default function AdminTypes() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (type) => {
-    const nextValue = !type.active;
+    if (
+      !type?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(type.id);
 
+    const nextValue = !type.active;
+
     try {
-      await base44.entities.PresentationType.update(type.id, { active: nextValue });
+      const updated = await base44.entities.PresentationType.update(
+        type.id,
+        {
+          active: nextValue,
+        },
+      );
+
       setTypes((current) => current.map((item) => (
-        item.id === type.id ? { ...item, active: nextValue } : item
+        item.id === type.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active: nextValue,
+            }
+          : item
       )));
+
       toast({
-        title: nextValue ? 'Tipo ativado' : 'Tipo desativado',
+        title: nextValue
+          ? 'Tipo ativado'
+          : 'Tipo desativado',
         description: nextValue
           ? 'Ele voltou a aparecer nas opções de criação.'
           : 'Apresentações existentes continuam preservadas.',
       });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
+
       toast({
         title: 'Não foi possível alterar o status',
         description: 'Tente novamente.',
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleMove = async (type, direction) => {
-    const currentIndex = sortedTypes.findIndex((item) => item.id === type.id);
+    if (
+      !type?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    const currentIndex = sortedTypes.findIndex(
+      (item) => item.id === type.id,
+    );
+
     const targetIndex = currentIndex + direction;
 
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedTypes.length) return;
+    if (
+      currentIndex < 0
+      || targetIndex < 0
+      || targetIndex >= sortedTypes.length
+    ) {
+      return;
+    }
 
     const target = sortedTypes[targetIndex];
-    const currentOrder = normalizeNumber(type.order_index, currentIndex + 1);
-    const targetOrder = normalizeNumber(target.order_index, targetIndex + 1);
 
+    const currentOrder = normalizeNumber(
+      type.order_index,
+      currentIndex + 1,
+    );
+
+    const targetOrder = normalizeNumber(
+      target.order_index,
+      targetIndex + 1,
+    );
+
+    actionLockRef.current = true;
     setBusyId(type.id);
 
     try {
-      await Promise.all([
-        base44.entities.PresentationType.update(type.id, { order_index: targetOrder }),
-        base44.entities.PresentationType.update(target.id, { order_index: currentOrder }),
-      ]);
+      await base44.entities.PresentationType.update(
+        type.id,
+        {
+          order_index: targetOrder,
+        },
+      );
 
-      setTypes((current) => current.map((item) => {
-        if (item.id === type.id) return { ...item, order_index: targetOrder };
-        if (item.id === target.id) return { ...item, order_index: currentOrder };
-        return item;
-      }));
+      try {
+        await base44.entities.PresentationType.update(
+          target.id,
+          {
+            order_index: currentOrder,
+          },
+        );
+      } catch (targetError) {
+        try {
+          await base44.entities.PresentationType.update(
+            type.id,
+            {
+              order_index: currentOrder,
+            },
+          );
+        } catch {
+          // A lista será recarregada abaixo.
+        }
+
+        throw targetError;
+      }
+
+      setTypes((current) => sortByOrderAndName(
+        current.map((item) => {
+          if (item.id === type.id) {
+            return {
+              ...item,
+              order_index: targetOrder,
+            };
+          }
+
+          if (item.id === target.id) {
+            return {
+              ...item,
+              order_index: currentOrder,
+            };
+          }
+
+          return item;
+        }),
+      ));
     } catch (error) {
       console.error('Erro ao reordenar tipo:', error);
+
       toast({
         title: 'Não foi possível alterar a ordem',
-        description: 'Tente novamente.',
+        description:
+          'A lista será atualizada para refletir o estado real.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -575,42 +758,106 @@ export default function AdminTypes() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget?.id) return;
+    const target = deleteTarget;
 
-    const presentationCount = presentationCountMap[deleteTarget.id] || 0;
-    const templateCount = templateCountMap[deleteTarget.id] || 0;
-    const flowCount = flowCountMap[deleteTarget.id] || 0;
-
-    if (presentationCount > 0 || templateCount > 0 || flowCount > 0) {
-      setDeleteTarget(null);
-      toast({
-        title: 'Este tipo está em uso',
-        description: 'Desative-o ou remova primeiro os vínculos com apresentações, modelos e fluxos guiados.',
-        variant: 'destructive',
-      });
+    if (
+      !target?.id
+      || busyId
+      || actionLockRef.current
+    ) {
       return;
     }
 
-    setBusyId(deleteTarget.id);
+    actionLockRef.current = true;
+    setBusyId(target.id);
 
     try {
-      await base44.entities.PresentationType.delete(deleteTarget.id);
-      setTypes((current) => current.filter((item) => item.id !== deleteTarget.id));
-      toast({ title: 'Tipo excluído', description: 'O registro foi removido definitivamente.' });
+      const [
+        currentPresentations,
+        currentTemplates,
+        currentFlows,
+      ] = await Promise.all([
+        base44.entities.Presentation.filter({
+          presentation_type_id: target.id,
+        }),
+        base44.entities.PresentationTemplate.filter({
+          presentation_type_id: target.id,
+        }),
+        base44.entities.GuidedFlow.filter({
+          presentation_type_id: target.id,
+        }),
+      ]);
+
+      const presentationCount = uniqueById(
+        currentPresentations,
+      ).length;
+
+      const templateCount = uniqueById(
+        currentTemplates,
+      ).length;
+
+      const flowCount = uniqueById(
+        currentFlows,
+      ).length;
+
+      if (
+        presentationCount > 0
+        || templateCount > 0
+        || flowCount > 0
+      ) {
+        toast({
+          title: 'Este tipo está em uso',
+          description:
+            'Desative-o ou remova primeiro os vínculos com apresentações, modelos e fluxos guiados.',
+          variant: 'destructive',
+        });
+
+        setDeleteTarget(null);
+        return;
+      }
+
+      await base44.entities.PresentationType.delete(
+        target.id,
+      );
+
+      setTypes((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
+      toast({
+        title: 'Tipo excluído',
+        description:
+          'O registro foi removido definitivamente.',
+      });
+
+      setDeleteTarget(null);
     } catch (error) {
       console.error('Erro ao excluir tipo:', error);
+
       toast({
         title: 'Não foi possível excluir',
-        description: 'Tente novamente.',
+        description:
+          'Atualize a lista e tente novamente.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
-      setDeleteTarget(null);
     }
   };
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || saving
+      || busyId
+      || loadLockRef.current
+    ) {
+      return;
+    }
+
     setRefreshing(true);
     await loadData({ silent: true });
   };
@@ -640,13 +887,27 @@ export default function AdminTypes() {
             type="button"
             variant="outline"
             onClick={handleRefresh}
-            disabled={refreshing}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
             className="w-full sm:w-auto"
           >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
-          <Button type="button" onClick={openCreateDialog} className="w-full sm:w-auto">
+          <Button
+            type="button"
+            onClick={openCreateDialog}
+            className="w-full sm:w-auto"
+            disabled={
+              saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />
             Novo tipo
           </Button>
