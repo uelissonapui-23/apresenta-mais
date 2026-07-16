@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowDown,
@@ -57,6 +57,37 @@ const DEFAULT_FORM = {
 function normalizeNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function uniqueById(rows) {
+  const map = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (row?.id) {
+      map.set(row.id, row);
+    }
+  }
+
+  return [...map.values()];
+}
+
+function sortByOrderAndName(rows) {
+  return uniqueById(rows).sort((left, right) => {
+    const orderDifference = (
+      normalizeNumber(left?.order_index)
+      - normalizeNumber(right?.order_index)
+    );
+
+    if (orderDifference !== 0) {
+      return orderDifference;
+    }
+
+    return String(left?.name || '').localeCompare(
+      String(right?.name || ''),
+      'pt-BR',
+      { sensitivity: 'base' },
+    );
+  });
 }
 
 function AccessDenied() {
@@ -226,7 +257,11 @@ function StyleCard({
 
 export default function AdminStyles() {
   const { toast } = useToast();
-  const { user, profile, loading: userLoading } = useCurrentUser();
+  const {
+    user,
+    isAdmin,
+    loading: userLoading,
+  } = useCurrentUser();
 
   const [styles, setStyles] = useState([]);
   const [presentations, setPresentations] = useState([]);
@@ -244,16 +279,31 @@ export default function AdminStyles() {
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const isAdmin = profile?.role === 'admin';
+  const loadLockRef = useRef(false);
+  const saveLockRef = useRef(false);
+  const actionLockRef = useRef(false);
 
   const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (loadLockRef.current) {
+      return;
+    }
+
     if (!user?.id || !isAdmin) {
+      setStyles([]);
+      setPresentations([]);
+      setTemplates([]);
+      setFlows([]);
+      setTips([]);
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
-    if (!silent) setLoading(true);
+    loadLockRef.current = true;
+
+    if (!silent) {
+      setLoading(true);
+    }
 
     try {
       const [styleRows, presentationRows, templateRows, flowRows, tipRows] = await Promise.all([
@@ -264,11 +314,11 @@ export default function AdminStyles() {
         base44.entities.AppTip.list('-created_date'),
       ]);
 
-      setStyles(Array.isArray(styleRows) ? styleRows : []);
-      setPresentations(Array.isArray(presentationRows) ? presentationRows : []);
-      setTemplates(Array.isArray(templateRows) ? templateRows : []);
-      setFlows(Array.isArray(flowRows) ? flowRows : []);
-      setTips(Array.isArray(tipRows) ? tipRows : []);
+      setStyles(sortByOrderAndName(styleRows));
+      setPresentations(uniqueById(presentationRows));
+      setTemplates(uniqueById(templateRows));
+      setFlows(uniqueById(flowRows));
+      setTips(uniqueById(tipRows));
     } catch (error) {
       console.error('Erro ao carregar estilos:', error);
       toast({
@@ -277,6 +327,7 @@ export default function AdminStyles() {
         variant: 'destructive',
       });
     } finally {
+      loadLockRef.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -287,11 +338,7 @@ export default function AdminStyles() {
   }, [loadData]);
 
   const sortedStyles = useMemo(
-    () => [...styles].sort((a, b) => {
-      const orderDifference = normalizeNumber(a.order_index, 0) - normalizeNumber(b.order_index, 0);
-      if (orderDifference !== 0) return orderDifference;
-      return String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR');
-    }),
+    () => sortByOrderAndName(styles),
     [styles],
   );
 
@@ -370,6 +417,13 @@ export default function AdminStyles() {
   };
 
   const handleSave = async () => {
+    if (
+      saving
+      || saveLockRef.current
+    ) {
+      return;
+    }
+
     const name = form.name.trim();
     const description = form.description.trim();
 
@@ -403,19 +457,53 @@ export default function AdminStyles() {
       active: !!form.active,
     };
 
+    saveLockRef.current = true;
     setSaving(true);
 
     try {
       if (editingStyle?.id) {
-        const updated = await base44.entities.PresentationStyle.update(editingStyle.id, payload);
-        setStyles((current) => current.map((item) => (
-          item.id === editingStyle.id ? { ...item, ...payload, ...(updated || {}) } : item
-        )));
-        toast({ title: 'Estilo atualizado', description: 'As alterações foram salvas.' });
+        const updated = await base44.entities.PresentationStyle.update(
+          editingStyle.id,
+          payload,
+        );
+
+        setStyles((current) => sortByOrderAndName(
+          current.map((item) => (
+            item.id === editingStyle.id
+              ? {
+                  ...item,
+                  ...payload,
+                  ...(updated || {}),
+                }
+              : item
+          )),
+        ));
+
+        toast({
+          title: 'Estilo atualizado',
+          description: 'As alterações foram salvas.',
+        });
       } else {
-        const created = await base44.entities.PresentationStyle.create(payload);
-        setStyles((current) => [...current, created]);
-        toast({ title: 'Estilo criado', description: 'Ele já pode ser usado no aplicativo.' });
+        const created = await base44.entities.PresentationStyle.create(
+          payload,
+        );
+
+        if (!created?.id) {
+          throw new Error(
+            'O novo estilo não retornou um ID válido.',
+          );
+        }
+
+        setStyles((current) => sortByOrderAndName([
+          ...current,
+          created,
+        ]));
+
+        toast({
+          title: 'Estilo criado',
+          description:
+            'Ele já pode ser usado no aplicativo.',
+        });
       }
 
       setDialogOpen(false);
@@ -429,67 +517,165 @@ export default function AdminStyles() {
         variant: 'destructive',
       });
     } finally {
+      saveLockRef.current = false;
       setSaving(false);
     }
   };
 
   const handleToggleActive = async (style) => {
-    const nextValue = !style.active;
+    if (
+      !style?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
     setBusyId(style.id);
 
+    const nextValue = !style.active;
+
     try {
-      await base44.entities.PresentationStyle.update(style.id, { active: nextValue });
+      const updated = await base44.entities.PresentationStyle.update(
+        style.id,
+        {
+          active: nextValue,
+        },
+      );
+
       setStyles((current) => current.map((item) => (
-        item.id === style.id ? { ...item, active: nextValue } : item
+        item.id === style.id
+          ? {
+              ...item,
+              ...(updated || {}),
+              active: nextValue,
+            }
+          : item
       )));
+
       toast({
-        title: nextValue ? 'Estilo ativado' : 'Estilo desativado',
+        title: nextValue
+          ? 'Estilo ativado'
+          : 'Estilo desativado',
         description: nextValue
           ? 'Ele voltou a aparecer nas opções de criação.'
           : 'Apresentações existentes continuam preservadas.',
       });
     } catch (error) {
       console.error('Erro ao alterar status:', error);
+
       toast({
         title: 'Não foi possível alterar o status',
         description: 'Tente novamente.',
         variant: 'destructive',
       });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleMove = async (style, direction) => {
-    const currentIndex = sortedStyles.findIndex((item) => item.id === style.id);
+    if (
+      !style?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    const currentIndex = sortedStyles.findIndex(
+      (item) => item.id === style.id,
+    );
+
     const targetIndex = currentIndex + direction;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= sortedStyles.length) return;
+
+    if (
+      currentIndex < 0
+      || targetIndex < 0
+      || targetIndex >= sortedStyles.length
+    ) {
+      return;
+    }
 
     const target = sortedStyles[targetIndex];
-    const currentOrder = normalizeNumber(style.order_index, currentIndex + 1);
-    const targetOrder = normalizeNumber(target.order_index, targetIndex + 1);
 
+    const currentOrder = normalizeNumber(
+      style.order_index,
+      currentIndex + 1,
+    );
+
+    const targetOrder = normalizeNumber(
+      target.order_index,
+      targetIndex + 1,
+    );
+
+    actionLockRef.current = true;
     setBusyId(style.id);
 
     try {
-      await Promise.all([
-        base44.entities.PresentationStyle.update(style.id, { order_index: targetOrder }),
-        base44.entities.PresentationStyle.update(target.id, { order_index: currentOrder }),
-      ]);
+      await base44.entities.PresentationStyle.update(
+        style.id,
+        {
+          order_index: targetOrder,
+        },
+      );
 
-      setStyles((current) => current.map((item) => {
-        if (item.id === style.id) return { ...item, order_index: targetOrder };
-        if (item.id === target.id) return { ...item, order_index: currentOrder };
-        return item;
-      }));
+      try {
+        await base44.entities.PresentationStyle.update(
+          target.id,
+          {
+            order_index: currentOrder,
+          },
+        );
+      } catch (targetError) {
+        try {
+          await base44.entities.PresentationStyle.update(
+            style.id,
+            {
+              order_index: currentOrder,
+            },
+          );
+        } catch {
+          // A lista será recarregada abaixo.
+        }
+
+        throw targetError;
+      }
+
+      setStyles((current) => sortByOrderAndName(
+        current.map((item) => {
+          if (item.id === style.id) {
+            return {
+              ...item,
+              order_index: targetOrder,
+            };
+          }
+
+          if (item.id === target.id) {
+            return {
+              ...item,
+              order_index: currentOrder,
+            };
+          }
+
+          return item;
+        }),
+      ));
     } catch (error) {
       console.error('Erro ao reordenar estilo:', error);
+
       toast({
         title: 'Não foi possível alterar a ordem',
-        description: 'Tente novamente.',
+        description:
+          'A lista será atualizada para refletir o estado real.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
@@ -513,29 +699,115 @@ export default function AdminStyles() {
   };
 
   const handleDelete = async () => {
-    if (!deleteTarget?.id) return;
+    const target = deleteTarget;
 
-    const targetId = deleteTarget.id;
-    setBusyId(targetId);
+    if (
+      !target?.id
+      || busyId
+      || actionLockRef.current
+    ) {
+      return;
+    }
+
+    actionLockRef.current = true;
+    setBusyId(target.id);
 
     try {
-      await base44.entities.PresentationStyle.delete(targetId);
-      setStyles((current) => current.filter((item) => item.id !== targetId));
+      const [
+        currentPresentations,
+        currentTemplates,
+        currentFlows,
+        currentTips,
+      ] = await Promise.all([
+        base44.entities.Presentation.filter({
+          communication_style_id: target.id,
+        }),
+        base44.entities.PresentationTemplate.filter({
+          communication_style_id: target.id,
+        }),
+        base44.entities.GuidedFlow.filter({
+          communication_style_id: target.id,
+        }),
+        base44.entities.AppTip.filter({
+          communication_style_id: target.id,
+        }),
+      ]);
+
+      const presentationCount = uniqueById(
+        currentPresentations,
+      ).length;
+
+      const templateCount = uniqueById(
+        currentTemplates,
+      ).length;
+
+      const flowCount = uniqueById(
+        currentFlows,
+      ).length;
+
+      const tipCount = uniqueById(
+        currentTips,
+      ).length;
+
+      if (
+        presentationCount > 0
+        || templateCount > 0
+        || flowCount > 0
+        || tipCount > 0
+      ) {
+        toast({
+          title: 'Estilo em uso',
+          description:
+            'Desative-o ou remova primeiro os vínculos com apresentações, modelos, fluxos e dicas.',
+          variant: 'destructive',
+        });
+
+        setDeleteTarget(null);
+        return;
+      }
+
+      await base44.entities.PresentationStyle.delete(
+        target.id,
+      );
+
+      setStyles((current) => current.filter(
+        (item) => item.id !== target.id,
+      ));
+
+      toast({
+        title: 'Estilo excluído',
+        description:
+          'O registro foi removido definitivamente.',
+      });
+
       setDeleteTarget(null);
-      toast({ title: 'Estilo excluído', description: 'O registro foi removido definitivamente.' });
     } catch (error) {
       console.error('Erro ao excluir estilo:', error);
+
       toast({
         title: 'Não foi possível excluir',
-        description: 'Confirme se o estilo ainda possui algum vínculo.',
+        description:
+          'Atualize a lista e tente novamente.',
         variant: 'destructive',
       });
+
+      await loadData({ silent: true });
     } finally {
+      actionLockRef.current = false;
       setBusyId('');
     }
   };
 
   const handleRefresh = async () => {
+    if (
+      refreshing
+      || saving
+      || busyId
+      || loadLockRef.current
+    ) {
+      return;
+    }
+
     setRefreshing(true);
     await loadData({ silent: true });
   };
@@ -561,11 +833,29 @@ export default function AdminStyles() {
         </div>
 
         <div className="flex w-full gap-2 sm:w-auto">
-          <Button variant="outline" onClick={handleRefresh} disabled={refreshing} className="flex-1 sm:flex-none">
+          <Button
+            variant="outline"
+            onClick={handleRefresh}
+            disabled={
+              refreshing
+              || saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+            className="flex-1 sm:flex-none"
+          >
             <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
             Atualizar
           </Button>
-          <Button onClick={openCreateDialog} className="flex-1 sm:flex-none">
+          <Button
+            onClick={openCreateDialog}
+            className="flex-1 sm:flex-none"
+            disabled={
+              saving
+              || Boolean(busyId)
+              || loadLockRef.current
+            }
+          >
             <Plus className="mr-2 h-4 w-4" />
             Novo estilo
           </Button>
