@@ -10,7 +10,8 @@ import BlockAttachmentsPanel from '@/components/editor/BlockAttachmentsPanel';
 
 export default function BlockEditor({
   block, blockTypes, detailLevel, onUpdate, onDelete, onDuplicate,
-  onMoveUp, onMoveDown, onIndent, onOutdent, onAddChild, isFirst, isLast, children
+  onMoveUp, onMoveDown, onIndent, onOutdent, onAddChild, isFirst, isLast,
+  dragHandleProps, isDragging, children
 }) {
   const [expanded, setExpanded] = useState(!block.is_collapsed);
   const [localBlock, setLocalBlock] = useState(block);
@@ -34,14 +35,24 @@ export default function BlockEditor({
   const showAdditional = detailLevel === 'complete';
 
   return (
-    <div className={`${block.is_hidden ? 'opacity-50' : ''}`} style={{ marginLeft: `${Math.min(block.depth_level, 4) * 16}px` }}>
-      <Card className={`mb-1.5 border ${block.is_essential ? 'border-primary/40 bg-primary/5' : ''}`}>
+    <div
+      className={`${block.is_hidden ? 'opacity-50' : ''} ${isDragging ? 'relative z-50' : ''}`}
+      style={{ marginLeft: `${Math.min(block.depth_level, 4) * 16}px` }}
+    >
+      <Card className={`mb-1.5 border transition-shadow ${block.is_essential ? 'border-primary/40 bg-primary/5' : ''} ${isDragging ? 'shadow-2xl ring-2 ring-primary/40' : ''}`}>
         <div className="p-3">
           <div className="flex items-center gap-1">
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 md:hidden" onClick={() => onMoveUp?.(block.id)} disabled={isFirst}>
               <ArrowUp className="w-3.5 h-3.5" />
             </Button>
-            <div className="hidden md:block cursor-grab text-muted-foreground"><GripVertical className="w-4 h-4" /></div>
+            <div
+              {...dragHandleProps}
+              className="flex h-8 w-8 shrink-0 touch-none cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-muted active:cursor-grabbing"
+              title="Segure e arraste para reorganizar"
+              aria-label={`Arrastar ${block.title || 'tópico'}`}
+            >
+              <GripVertical className="h-4 w-4" />
+            </div>
             <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={() => setExpanded(!expanded)}>
               {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
             </Button>
