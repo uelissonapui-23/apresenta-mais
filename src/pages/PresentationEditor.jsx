@@ -825,6 +825,211 @@ export default function PresentationEditor() {
     }
   };
 
+
+  const handleDragReorder = async ({
+    draggedId,
+    targetId,
+    sourceIndex,
+    destinationIndex,
+  }) => {
+    if (
+      operationLockRef.current
+      || draggedId === targetId
+    ) {
+      return;
+    }
+
+    const draggedBlock = blocks.find(
+      (block) => block.id === draggedId,
+    );
+
+    const targetBlock = blocks.find(
+      (block) => block.id === targetId,
+    );
+
+    if (!draggedBlock || !targetBlock) {
+      return;
+    }
+
+    const draggedDescendantIds = new Set(
+      getDescendantIds(blocks, draggedId),
+    );
+
+    if (draggedDescendantIds.has(targetId)) {
+      toast({
+        title: 'Movimento inválido',
+        description:
+          'Um tópico não pode ser colocado dentro da própria estrutura.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const oldParentId = normalizeParentId(
+      draggedBlock.parent_id,
+    );
+
+    const newParentId = normalizeParentId(
+      targetBlock.parent_id,
+    );
+
+    const depthDelta = (
+      safeNumber(targetBlock.depth_level)
+      - safeNumber(draggedBlock.depth_level)
+    );
+
+    const destinationSiblings = getDirectChildren(
+      blocks,
+      newParentId,
+    ).filter((block) => block.id !== draggedId);
+
+    const targetSiblingIndex = destinationSiblings.findIndex(
+      (block) => block.id === targetId,
+    );
+
+    if (targetSiblingIndex < 0) {
+      return;
+    }
+
+    const insertIndex = sourceIndex < destinationIndex
+      ? targetSiblingIndex + 1
+      : targetSiblingIndex;
+
+    destinationSiblings.splice(
+      insertIndex,
+      0,
+      draggedBlock,
+    );
+
+    const oldParentSiblings = oldParentId === newParentId
+      ? destinationSiblings
+      : getDirectChildren(blocks, oldParentId)
+        .filter((block) => block.id !== draggedId);
+
+    const descendantBlocks = [...draggedDescendantIds]
+      .map((descendantId) => blocks.find(
+        (block) => block.id === descendantId,
+      ))
+      .filter(Boolean);
+
+    const updatedById = new Map();
+
+    destinationSiblings.forEach((block, index) => {
+      updatedById.set(block.id, {
+        ...block,
+        parent_id: newParentId,
+        order_index: index,
+        depth_level: block.id === draggedId
+          ? Math.max(0, safeNumber(block.depth_level) + depthDelta)
+          : block.depth_level,
+      });
+    });
+
+    if (oldParentId !== newParentId) {
+      oldParentSiblings.forEach((block, index) => {
+        updatedById.set(block.id, {
+          ...block,
+          order_index: index,
+        });
+      });
+    }
+
+    descendantBlocks.forEach((block) => {
+      updatedById.set(block.id, {
+        ...block,
+        depth_level: Math.max(
+          0,
+          safeNumber(block.depth_level) + depthDelta,
+        ),
+      });
+    });
+
+    operationLockRef.current = true;
+    setProcessing(true);
+    setSaveStatus('saving');
+
+    try {
+      const updates = [...updatedById.values()];
+
+      for (const block of updates) {
+        const original = blocks.find(
+          (item) => item.id === block.id,
+        );
+
+        if (!original) {
+          continue;
+        }
+
+        const payload = {};
+
+        if (
+          normalizeParentId(original.parent_id)
+          !== normalizeParentId(block.parent_id)
+        ) {
+          payload.parent_id = normalizeParentId(
+            block.parent_id,
+          );
+        }
+
+        if (
+          safeNumber(original.order_index)
+          !== safeNumber(block.order_index)
+        ) {
+          payload.order_index = safeNumber(
+            block.order_index,
+          );
+        }
+
+        if (
+          safeNumber(original.depth_level)
+          !== safeNumber(block.depth_level)
+        ) {
+          payload.depth_level = safeNumber(
+            block.depth_level,
+          );
+        }
+
+        if (Object.keys(payload).length > 0) {
+          await base44.entities.PresentationBlock.update(
+            block.id,
+            payload,
+          );
+        }
+      }
+
+      setBlocksAndNormalize((current) => current.map(
+        (block) => updatedById.get(block.id) || block,
+      ));
+
+      setSaveStatus('saved');
+
+      toast({
+        title: 'Ordem atualizada',
+        description:
+          'O tópico e seus subtópicos foram reorganizados.',
+      });
+    } catch (error) {
+      console.error(
+        'Erro ao reorganizar por arrastar:',
+        error,
+      );
+
+      setSaveStatus('error');
+
+      toast({
+        title: 'Não foi possível reorganizar',
+        description:
+          'A estrutura será recarregada sem apagar nenhum conteúdo.',
+        variant: 'destructive',
+      });
+
+      await loadEditor({ silent: true });
+    } finally {
+      operationLockRef.current = false;
+      setProcessing(false);
+    }
+  };
+
   const handleMoveUp = (blockId) => moveBlock(blockId, -1);
   const handleMoveDown = (blockId) => moveBlock(blockId, 1);
 
@@ -1196,6 +1401,12 @@ export default function PresentationEditor() {
           </Card>
         </div>
 
+        {viewMode === 'structure' && orderedBlocks.length > 0 && !processing && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Segure o ícone de seis pontos e arraste o tópico para a posição desejada.
+          </div>
+        )}
+
         {processing && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -1230,6 +1441,8 @@ export default function PresentationEditor() {
                 onIndent={handleIndent}
                 onOutdent={handleOutdent}
                 onAddChild={handleAddChild}
+                onDragReorder={handleDragReorder}
+                dragDisabled={processing}
               />
             )}
 
