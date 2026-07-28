@@ -17,6 +17,7 @@ import {
   Flag,
   Fullscreen,
   List,
+  LogOut,
   Maximize2,
   Menu,
   Minus,
@@ -1107,6 +1108,54 @@ export default function PresentMode() {
     handleRestartSession();
   }, [confirmBeforeRestart, handleRestartSession]);
 
+  const handleExitPresentation = useCallback(async () => {
+    if (operationRef.current || saving) {
+      return;
+    }
+
+    operationRef.current = true;
+    setSaving(true);
+
+    try {
+      const saved = await persistSession({
+        forceStatus: 'paused',
+        silent: false,
+      });
+
+      if (!saved && sessionRef.current?.id) {
+        throw new Error('A sessão não pôde ser salva.');
+      }
+
+      if (document.fullscreenElement) {
+        try {
+          await document.exitFullscreen();
+        } catch (fullscreenError) {
+          console.warn(
+            'Não foi possível sair da tela cheia:',
+            fullscreenError,
+          );
+        }
+      }
+
+      navigate(`/presentations/${id}/editor`);
+    } catch (error) {
+      console.error(
+        'Erro ao sair da apresentação:',
+        error,
+      );
+
+      toast({
+        title: 'Não foi possível sair com segurança',
+        description:
+          'Tente novamente para garantir que o progresso seja salvo.',
+        variant: 'destructive',
+      });
+    } finally {
+      operationRef.current = false;
+      setSaving(false);
+    }
+  }, [id, navigate, persistSession, saving, toast]);
+
   const handleEndPresentation = useCallback(async () => {
     if (operationRef.current) return;
 
@@ -1318,6 +1367,28 @@ export default function PresentMode() {
             </Badge>
           )}
         </div>
+      </div>
+
+      <div
+        data-no-stage-click
+        className="fixed right-3 top-3 z-[90] sm:right-5 sm:top-5"
+      >
+        <Button
+          type="button"
+          variant="destructive"
+          size="sm"
+          onClick={handleExitPresentation}
+          disabled={saving}
+          className="gap-2 shadow-2xl"
+          aria-label="Sair da apresentação e voltar ao editor"
+        >
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <LogOut className="h-4 w-4" />
+          )}
+          <span>Sair</span>
+        </Button>
       </div>
 
       <main className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto overflow-x-hidden px-5 pb-28 pt-20 sm:px-10 md:px-16 lg:px-24">
