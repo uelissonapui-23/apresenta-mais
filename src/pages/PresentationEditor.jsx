@@ -1401,9 +1401,9 @@ export default function PresentationEditor() {
           </Card>
         </div>
 
-        {viewMode === 'structure' && orderedBlocks.length > 0 && !processing && (
+        {orderedBlocks.length > 0 && !processing && (
           <div className="mb-3 flex items-center gap-2 rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            Segure o ícone de seis pontos e arraste o tópico para a posição desejada.
+            Segure o ícone de seis pontos e arraste o tópico. A nova ordem é salva e vale para todos os modos.
           </div>
         )}
 
@@ -1447,7 +1447,12 @@ export default function PresentationEditor() {
             )}
 
             {viewMode === 'text' && (
-              <ViewText blocks={orderedBlocks} detailLevel={detailLevel} />
+              <ViewText
+                blocks={orderedBlocks}
+                detailLevel={detailLevel}
+                onDragReorder={handleDragReorder}
+                dragDisabled={processing}
+              />
             )}
 
             {viewMode === 'cards' && (
@@ -1455,11 +1460,18 @@ export default function PresentationEditor() {
                 blocks={orderedBlocks}
                 blockTypes={blockTypes}
                 detailLevel={detailLevel}
+                onDragReorder={handleDragReorder}
+                dragDisabled={processing}
               />
             )}
 
             {viewMode === 'script' && (
-              <ViewScript blocks={orderedBlocks} detailLevel={detailLevel} />
+              <ViewScript
+                blocks={orderedBlocks}
+                detailLevel={detailLevel}
+                onDragReorder={handleDragReorder}
+                dragDisabled={processing}
+              />
             )}
           </div>
         )}
