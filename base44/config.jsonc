@@ -1,5 +1,5 @@
 {
-  "name": "untitled",
+  "name": "Apresenta+",
   "site": {
     "installCommand": "npm install",
     "buildCommand": "npm run build",
