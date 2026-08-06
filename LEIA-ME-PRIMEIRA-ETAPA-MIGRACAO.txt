@@ -1,0 +1,44 @@
+APRESENTA+ — PRIMEIRA ETAPA DE MIGRAÇÃO
+
+Esta etapa prepara GitHub, Supabase e Vercel sem trocar o backend atual do app.
+
+IMPORTANTE:
+- VITE_BACKEND_PROVIDER permanece como base44.
+- Nenhuma página principal foi reescrita.
+- Nenhuma entidade Base44 foi removida.
+- Anúncios e planos futuros permanecem desativados.
+
+PASSOS LOCAIS:
+1. Copie .env.example para .env.local.
+2. Mantenha VITE_BACKEND_PROVIDER=base44 enquanto a migração não começar.
+3. Execute npm install para instalar @supabase/supabase-js e atualizar package-lock.json.
+4. Execute:
+   npm run check:migration-foundation
+   npm run typecheck
+   npm run lint
+   npm run build
+
+GITHUB:
+- Crie um repositório privado vazio.
+- Remova o origin file:///app, se ainda existir.
+- Conecte o novo repositório e envie a branch main.
+
+SUPABASE:
+Configure no GitHub Actions:
+- SUPABASE_ACCESS_TOKEN
+- SUPABASE_DB_PASSWORD
+- SUPABASE_PROJECT_ID
+
+VERCEL:
+Configure:
+- VITE_BACKEND_PROVIDER=base44 (durante a transição)
+- VITE_BASE44_APP_ID=ID atual, se necessário para manter a versão antiga funcionando
+- VITE_SUPABASE_URL
+- VITE_SUPABASE_PUBLISHABLE_KEY
+
+A primeira migration cria somente:
+- profiles
+- subscription_plans
+- user_subscriptions
+
+Os planos sem anúncios e apoiador ficam inativos. Nenhuma cobrança é implementada agora.
