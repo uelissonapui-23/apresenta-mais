@@ -14,6 +14,9 @@ function createSupabaseClient() {
     backendConfig.supabaseUrl,
     backendConfig.supabasePublishableKey,
     {
+      db: {
+        schema: backendConfig.supabaseSchema,
+      },
       auth: {
         persistSession: true,
         autoRefreshToken: true,

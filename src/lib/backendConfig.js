@@ -6,6 +6,7 @@ export const backendConfig = Object.freeze({
   provider: requestedProvider === 'supabase' ? 'supabase' : 'base44',
   supabaseUrl: normalize(import.meta.env.VITE_SUPABASE_URL),
   supabasePublishableKey: normalize(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY),
+  supabaseSchema: normalize(import.meta.env.VITE_SUPABASE_SCHEMA) || 'apresenta_mais',
   features: Object.freeze({
     ads: import.meta.env.VITE_FEATURE_ADS === 'true',
     paidPlans: import.meta.env.VITE_FEATURE_PAID_PLANS === 'true',

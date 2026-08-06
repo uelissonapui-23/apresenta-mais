@@ -2,8 +2,8 @@ project_id = "apresenta-mais"
 
 [api]
 enabled = true
-schemas = ["public", "graphql_public"]
-extra_search_path = ["public", "extensions"]
+schemas = ["public", "graphql_public", "apresenta_mais"]
+extra_search_path = ["public", "extensions", "apresenta_mais"]
 max_rows = 1000
 
 [db]
