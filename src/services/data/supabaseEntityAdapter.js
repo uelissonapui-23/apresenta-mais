@@ -39,7 +39,20 @@ function normalizeRow(row) {
   };
 }
 
-function normalizePayload(payload = {}) {
+const NULLABLE_UUID_FIELDS = Object.freeze({
+  presentations: new Set([
+    'presentation_type_id',
+    'objective_id',
+    'communication_style_id',
+    'theme_id',
+  ]),
+  presentation_blocks: new Set([
+    'parent_id',
+    'block_type_id',
+  ]),
+});
+
+function normalizePayload(payload = {}, table = '') {
   const result = { ...payload };
 
   delete result.created_date;
@@ -50,6 +63,19 @@ function normalizePayload(payload = {}) {
   // Campos calculados/legados que nunca devem ser enviados ao banco.
   delete result.created_by;
   delete result.updated_by;
+
+  // O Base44 aceitava string vazia em relacionamentos opcionais. No Postgres,
+  // colunas UUID aceitam UUID válido ou NULL, nunca ''. Normalizamos aqui para
+  // proteger todas as telas que ainda usam o contrato legado.
+  const nullableUuidFields = NULLABLE_UUID_FIELDS[table];
+
+  if (nullableUuidFields) {
+    nullableUuidFields.forEach((field) => {
+      if (typeof result[field] === 'string' && result[field].trim() === '') {
+        result[field] = null;
+      }
+    });
+  }
 
   return result;
 }
@@ -79,7 +105,22 @@ function applyFilters(query, filters = {}) {
 }
 
 function ensureResult(data, error) {
-  if (error) throw error;
+  if (error) {
+    const normalizedError = new Error(
+      [error.message, error.details, error.hint]
+        .filter(Boolean)
+        .join(' — '),
+    );
+
+    normalizedError.name = 'SupabaseDataError';
+    normalizedError.code = error.code;
+    normalizedError.details = error.details;
+    normalizedError.hint = error.hint;
+    normalizedError.original = error;
+
+    throw normalizedError;
+  }
+
   return data;
 }
 
@@ -137,7 +178,7 @@ function createAdapter(table) {
     async create(payload) {
       const { data, error } = await supabase
         .from(table)
-        .insert(normalizePayload(payload))
+        .insert(normalizePayload(payload, table))
         .select('*')
         .single();
 
@@ -149,7 +190,7 @@ function createAdapter(table) {
 
       const { data, error } = await supabase
         .from(table)
-        .insert(rows.map(normalizePayload))
+        .insert(rows.map((row) => normalizePayload(row, table)))
         .select('*');
 
       return ensureResult(data, error)?.map(normalizeRow) || [];
@@ -158,7 +199,7 @@ function createAdapter(table) {
     async update(id, updates) {
       const { data, error } = await supabase
         .from(table)
-        .update(normalizePayload(updates))
+        .update(normalizePayload(updates, table))
         .eq('id', id)
         .select('*')
         .single();

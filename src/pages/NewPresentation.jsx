@@ -625,9 +625,9 @@ export default function NewPresentation() {
         title: form.title.trim(),
         subtitle: form.subtitle.trim(),
         description: form.description.trim(),
-        presentation_type_id: form.presentation_type_id || '',
-        objective_id: form.objective_id || '',
-        communication_style_id: form.communication_style_id || '',
+        presentation_type_id: form.presentation_type_id || null,
+        objective_id: form.objective_id || null,
+        communication_style_id: form.communication_style_id || null,
         audience: form.audience.trim(),
         audience_knowledge_level: form.audience_knowledge_level,
         main_theme: form.main_theme.trim(),
@@ -635,7 +635,7 @@ export default function NewPresentation() {
         estimated_duration_minutes: normalizeDuration(
           form.estimated_duration_minutes,
         ),
-        theme_id: form.theme_id || '',
+        theme_id: form.theme_id || null,
         default_view_mode: form.default_view_mode,
         status: 'draft',
         progress_percentage: 0,
@@ -648,7 +648,7 @@ export default function NewPresentation() {
       const presentation = await base44.entities.Presentation.create(payload);
 
       if (!presentation?.id) {
-        throw new Error('A Base44 não retornou o identificador da apresentação.');
+        throw new Error('O backend não retornou o identificador da apresentação.');
       }
 
       toast({
