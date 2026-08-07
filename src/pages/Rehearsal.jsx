@@ -1462,7 +1462,7 @@ export default function Rehearsal() {
             <DialogTitle>Encerrar ensaio</DialogTitle>
           </DialogHeader>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-3">
             <div className="rounded-xl bg-muted p-3 text-center">
               <p className="text-lg font-bold">{completedCount}</p>
               <p className="text-xs text-muted-foreground">Concluídos</p>

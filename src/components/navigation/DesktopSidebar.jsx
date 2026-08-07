@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Presentation, Plus, LayoutTemplate, BookOpen, Settings, Shield, PanelLeftClose, PanelLeft, LogOut, User } from 'lucide-react';
+import BrandLogo from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { authProvider } from '@/services/authProvider';
 
@@ -19,10 +20,17 @@ export default function DesktopSidebar({ isAdmin, userName }) {
   const isActive = (path) => path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   return (
-    <aside className={`hidden md:flex flex-col h-screen fixed left-0 top-0 z-40 bg-sidebar border-r border-sidebar-border transition-all duration-300 ${collapsed ? 'w-16' : 'w-56'}`}>
+    <aside className={`hidden lg:flex flex-col h-screen fixed left-0 top-0 z-40 bg-sidebar border-r border-sidebar-border transition-all duration-300 ${collapsed ? 'w-16' : 'w-56'}`}>
       <div className={`flex items-center h-14 px-4 border-b border-sidebar-border ${collapsed ? 'justify-center' : 'justify-between'}`}>
-        {!collapsed && <span className="font-bold text-lg text-sidebar-foreground">Apresenta+</span>}
-        <Button variant="ghost" size="icon" className="h-8 w-8 text-sidebar-foreground" onClick={() => setCollapsed(!collapsed)}>
+        <Link to="/" className="min-w-0">
+          <BrandLogo
+            compact={collapsed}
+            showTagline={false}
+            markClassName={collapsed ? 'h-9 w-9' : 'h-9 w-9'}
+            nameClassName="text-base"
+          />
+        </Link>
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0 text-sidebar-foreground" onClick={() => setCollapsed(!collapsed)}>
           {collapsed ? <PanelLeft className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
         </Button>
       </div>

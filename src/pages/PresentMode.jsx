@@ -11,7 +11,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Clock3,
   Eye,
   EyeOff,
   Flag,
@@ -19,9 +18,7 @@ import {
   List,
   LogOut,
   Maximize2,
-  Menu,
   Minus,
-  Moon,
   MoreHorizontal,
   Pause,
   Play,
@@ -30,7 +27,6 @@ import {
   RotateCcw,
   Settings,
   SkipForward,
-  Sun,
   Text,
   X,
 } from 'lucide-react';
@@ -40,7 +36,6 @@ import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
@@ -1873,7 +1868,7 @@ export default function PresentMode() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-3">
             <div className="rounded-xl bg-muted p-3 text-center">
               <p className="text-xl font-bold">{completedCount}</p>
               <p className="text-[11px] text-muted-foreground">Concluídos</p>

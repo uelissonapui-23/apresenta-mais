@@ -1,12 +1,11 @@
 import React from 'react';
 
+import BrandLogo from '@/components/BrandLogo';
+
 import {
   Link,
 } from 'react-router-dom';
 
-import {
-  Presentation,
-} from 'lucide-react';
 
 /*
 |--------------------------------------------------------------------------
@@ -37,25 +36,13 @@ function AuthHeader({
       {showBrand && (
         <Link
           to="/"
-          className="mx-auto mb-6 inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition-opacity hover:opacity-80"
+          className="brand-focus mx-auto mb-6 inline-flex rounded-2xl px-2 py-1 transition-opacity hover:opacity-80"
           aria-label="Ir para a página inicial do Apresenta+"
         >
-          <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-            <Presentation
-              className="h-5 w-5"
-              aria-hidden="true"
-            />
-          </span>
-
-          <span className="text-left">
-            <span className="block text-base font-bold leading-tight">
-              Apresenta+
-            </span>
-
-            <span className="block text-[11px] leading-tight text-muted-foreground">
-              Organize. Ensaie. Apresente.
-            </span>
-          </span>
+          <BrandLogo
+            markClassName="h-11 w-11"
+            nameClassName="text-lg"
+          />
         </Link>
       )}
 

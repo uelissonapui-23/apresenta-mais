@@ -12,6 +12,7 @@ import {
 
 import { authProvider } from '@/services/authProvider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import BrandLogo from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -218,11 +219,13 @@ export default function ForgotPassword() {
           </div>
 
           <div className="relative z-10">
-            <Link to="/login" className="inline-flex items-center gap-3 font-bold">
-              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-                <KeyRound className="h-6 w-6" />
-              </span>
-              <span className="text-xl">Apresenta+</span>
+            <Link to="/login" className="brand-focus inline-flex rounded-2xl">
+              <BrandLogo
+                inverse
+                markClassName="h-14 w-14"
+                nameClassName="text-xl"
+                taglineClassName="text-xs"
+              />
             </Link>
           </div>
 

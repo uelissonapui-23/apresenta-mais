@@ -23,6 +23,7 @@ import {
 } from 'react-router-dom';
 
 import { Badge } from '@/components/ui/badge';
+import BrandLogo from '@/components/BrandLogo';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -642,21 +643,16 @@ export default function Privacy() {
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
           <Link
             to="/"
-            className="flex min-w-0 items-center gap-3"
+            className="brand-focus flex min-w-0 items-center rounded-xl"
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-
-            <div className="min-w-0">
-              <p className="truncate font-bold">
-                Apresenta+
-              </p>
-
-              <p className="hidden truncate text-xs text-muted-foreground sm:block">
-                Política de Privacidade
-              </p>
-            </div>
+            <BrandLogo
+              markClassName="h-10 w-10"
+              nameClassName="text-base"
+              showTagline={false}
+            />
+            <span className="ml-2 hidden truncate text-xs text-muted-foreground sm:block">
+              Política de Privacidade
+            </span>
           </Link>
 
           <div className="flex items-center gap-2">

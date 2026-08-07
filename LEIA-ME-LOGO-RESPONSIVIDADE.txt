@@ -1,0 +1,59 @@
+APRESENTA+ — LOGO OFICIAL + RESPONSIVIDADE
+
+O que foi aplicado
+- Nova identidade oficial preta/vermelha, sem degradê.
+- Marca aplicada no menu desktop, gaveta mobile, autenticação, cadastro,
+  recuperação de senha, onboarding, tela de carregamento e área de privacidade.
+- Ícone/favicons próprios do Apresenta+; removido favicon antigo do Base44.
+- manifest.json válido para instalação/PWA e ícones 192/512.
+- Cor principal do app alinhada à nova identidade vermelha.
+- Logo permanece legível em tema claro e escuro usando o símbolo sobre base branca.
+
+Compatibilidade / responsividade
+- Proteção global contra overflow horizontal e texto saindo da tela.
+- Imagens, vídeos e SVGs não ultrapassam a largura disponível.
+- Flex/grid containers recebem min-width seguro para permitir encolhimento.
+- Modais agora respeitam largura e altura reais da tela e passam a rolar internamente.
+- Sheets/drawers foram limitados para caber em celular e tablet.
+- Selects, dropdowns e popovers não podem ultrapassar a viewport.
+- Resumos de ensaio/apresentação empilham em telas muito estreitas.
+- Safe area do celular preservada e zoom do navegador voltou a ser permitido.
+- Layout desktop/tablet/mobile continua usando os breakpoints existentes do app.
+
+Correção adicional importante
+- vite.config.js recebeu novamente o alias @ -> src. Isso corrige o erro:
+  Rollup failed to resolve import "@/App.jsx" from "src/main.jsx".
+
+VALIDAÇÃO FEITA NESTE PACOTE
+- ESLint dos arquivos alterados: sem erros.
+- O build completo não pôde ser executado no ambiente de geração porque o
+  node_modules do ZIP é do Windows e não contém o binário opcional Linux do Rollup.
+  No Windows/Vercel o alias necessário para o erro anterior já está corrigido.
+
+COMO APLICAR
+1. Extraia este ZIP diretamente na raiz do projeto e aceite substituir.
+2. Execute:
+
+npm install
+npm run build
+
+3. Se o build ficar verde:
+
+git add .
+git commit -m "Aplica nova logo e responsividade do Apresenta Mais"
+git push origin main
+
+TESTE VISUAL RECOMENDADO
+- 320/360 px: login, cadastro, menu, criar apresentação, editor e modais.
+- 375/430 px: celulares comuns.
+- 768/820 px: tablet vertical.
+- 1024 px: tablet horizontal / notebook pequeno.
+- 1366/1440 px ou maior: desktop.
+
+Verifique principalmente:
+- nenhum texto cortado para fora da tela;
+- botões acessíveis e sem sobreposição;
+- modais rolando quando o conteúdo for alto;
+- menu inferior sem cobrir ações;
+- editor sem scroll horizontal involuntário;
+- logo legível em tema claro e escuro.

@@ -13,9 +13,7 @@ import {
 } from 'react-router-dom';
 
 import {
-  Bell,
   BookOpen,
-  ChevronLeft,
   ChevronRight,
   CircleUserRound,
   CreditCard,
@@ -28,21 +26,18 @@ import {
   Heart,
   Megaphone,
   Menu,
-  Moon,
   MoreHorizontal,
   Palette,
   PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Presentation,
   Settings,
   ShieldCheck,
   Sparkles,
-  Sun,
   UserRound,
-  X,
 } from 'lucide-react';
 
+import BrandLogo from '@/components/BrandLogo';
 import { backendConfig } from '@/lib/backendConfig';
 import useCurrentUser from '@/hooks/useCurrentUser';
 
@@ -422,23 +417,14 @@ function Sidebar({
       >
         <Link
           to="/"
-          className="flex min-w-0 items-center gap-3"
+          className="brand-focus flex min-w-0 items-center rounded-xl"
+          aria-label="Apresenta+ — início"
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-sm">
-            <Presentation className="h-5 w-5" />
-          </div>
-
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="truncate text-base font-bold">
-                Apresenta+
-              </p>
-
-              <p className="truncate text-[11px] text-muted-foreground">
-                Organize. Ensaie. Apresente.
-              </p>
-            </div>
-          )}
+          <BrandLogo
+            compact={collapsed}
+            markClassName={collapsed ? 'h-11 w-11' : 'h-10 w-10'}
+            nameClassName="text-base"
+          />
         </Link>
 
         {!collapsed && (
@@ -768,14 +754,11 @@ function MobileDrawer({
         className="w-[88vw] max-w-sm overflow-y-auto p-0"
       >
         <SheetHeader className="border-b p-4 text-left">
-          <SheetTitle className="flex items-center gap-3">
-            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-              <Presentation className="h-5 w-5" />
-            </span>
-
-            <span>
-              Apresenta+
-            </span>
+          <SheetTitle className="pr-8">
+            <BrandLogo
+              markClassName="h-11 w-11"
+              nameClassName="text-lg"
+            />
           </SheetTitle>
         </SheetHeader>
 

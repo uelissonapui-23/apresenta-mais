@@ -24,6 +24,7 @@ import {
 import ProtectedRoute from '@/components/ProtectedRoute';
 import AdminRoute from '@/components/AdminRoute';
 import ScrollToTop from '@/components/ScrollToTop';
+import BrandLogo from '@/components/BrandLogo';
 
 import AppLayout from '@/components/layout/AppLayout';
 import PageNotFound from '@/lib/PageNotFound';
@@ -167,17 +168,17 @@ function AppLoading() {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-background">
       <div className="flex flex-col items-center gap-4">
-        <div className="relative flex h-14 w-14 items-center justify-center">
-          <div className="absolute inset-0 rounded-full border-4 border-muted" />
-
-          <div className="absolute inset-0 animate-spin rounded-full border-4 border-transparent border-t-primary" />
-
-          <div className="h-4 w-4 rounded-full bg-primary" />
+        <div className="relative">
+          <BrandLogo
+            compact
+            markClassName="h-16 w-16"
+          />
+          <span className="absolute -inset-2 -z-10 animate-pulse rounded-full bg-primary/10" />
         </div>
 
         <div className="text-center">
-          <p className="text-sm font-medium">
-            Apresenta+
+          <p className="text-sm font-semibold">
+            Apresenta<span className="text-red-600">+</span>
           </p>
 
           <p className="mt-1 text-xs text-muted-foreground">

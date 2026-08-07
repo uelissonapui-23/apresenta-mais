@@ -25,11 +25,11 @@ import {
   Presentation,
   ShieldCheck,
   Sparkles,
-  UserPlus,
 } from 'lucide-react';
 
 import { authProvider } from '@/services/authProvider';
 import AuthLayout from '@/components/AuthLayout';
+import BrandLogo from '@/components/BrandLogo';
 import GoogleIcon from '@/components/GoogleIcon';
 import useCurrentUser from '@/hooks/useCurrentUser';
 
@@ -430,24 +430,14 @@ function RegisterBenefits() {
       <div>
         <Link
           to="/"
-          className="inline-flex items-center gap-3 transition-opacity hover:opacity-90"
+          className="brand-focus inline-flex rounded-2xl transition-opacity hover:opacity-90"
         >
-          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-            <Presentation
-              className="h-6 w-6"
-              aria-hidden="true"
-            />
-          </div>
-
-          <div>
-            <p className="text-xl font-bold">
-              Apresenta+
-            </p>
-
-            <p className="text-sm text-primary-foreground/70">
-              Da primeira ideia ao último tópico.
-            </p>
-          </div>
+          <BrandLogo
+            inverse
+            markClassName="h-14 w-14"
+            nameClassName="text-xl"
+            taglineClassName="text-xs"
+          />
         </Link>
 
         <div className="mt-20 max-w-md">
@@ -1198,10 +1188,10 @@ export default function Register() {
       <div className="flex min-h-screen min-w-0 items-center justify-center px-4 py-8 sm:px-6 lg:px-10 xl:px-16">
         <div className="w-full min-w-0 max-w-md">
           <div className="mb-8 text-center lg:text-left">
-            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary lg:mx-0">
-              <UserPlus
-                className="h-7 w-7 text-primary-foreground"
-                aria-hidden="true"
+            <div className="mx-auto mb-5 w-fit lg:mx-0">
+              <BrandLogo
+                compact
+                markClassName="h-16 w-16"
               />
             </div>
 

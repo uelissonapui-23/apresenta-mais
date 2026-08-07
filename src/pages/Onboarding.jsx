@@ -39,6 +39,7 @@ import useCurrentUser from '@/hooks/useCurrentUser';
 import { saveUserProfile } from '@/services/profileRepository';
 import { getUserPreference, saveUserPreference } from '@/services/userPreferenceRepository';
 
+import BrandLogo from '@/components/BrandLogo';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 
@@ -942,15 +943,11 @@ export default function Onboarding() {
     <div className="min-h-screen overflow-x-hidden bg-muted/25 px-4 py-5 sm:px-6 sm:py-8">
       <div className="mx-auto w-full max-w-3xl">
         <div className="mb-5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 font-bold">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Presentation className="h-5 w-5" />
-            </div>
-
-            <span>
-              Apresenta+
-            </span>
-          </div>
+          <BrandLogo
+            markClassName="h-10 w-10"
+            nameClassName="text-base"
+            showTagline={false}
+          />
 
           {step > 0 && (
             <Button
