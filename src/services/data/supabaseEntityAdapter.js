@@ -8,6 +8,9 @@ const MIGRATED_TABLES = Object.freeze({
   CommunicationStyle: 'communication_styles',
   PresentationTheme: 'presentation_themes',
   BlockType: 'block_types',
+  UserPreference: 'user_preferences',
+  PresentationSession: 'presentation_sessions',
+  SessionBlockProgress: 'session_block_progress',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({
@@ -50,6 +53,20 @@ const NULLABLE_UUID_FIELDS = Object.freeze({
     'parent_id',
     'block_type_id',
   ]),
+  presentation_sessions: new Set([
+    'current_block_id',
+  ]),
+});
+
+const NULLABLE_TIMESTAMP_FIELDS = Object.freeze({
+  presentation_sessions: new Set([
+    'paused_at',
+    'finished_at',
+  ]),
+  session_block_progress: new Set([
+    'started_at',
+    'completed_at',
+  ]),
 });
 
 function normalizePayload(payload = {}, table = '') {
@@ -75,6 +92,26 @@ function normalizePayload(payload = {}, table = '') {
         result[field] = null;
       }
     });
+  }
+
+  // O Base44 também tolerava '' em datas opcionais. PostgreSQL timestamptz não.
+  const nullableTimestampFields = NULLABLE_TIMESTAMP_FIELDS[table];
+
+  if (nullableTimestampFields) {
+    nullableTimestampFields.forEach((field) => {
+      if (typeof result[field] === 'string' && result[field].trim() === '') {
+        result[field] = null;
+      }
+    });
+  }
+
+  // Preferências foram armazenadas historicamente tanto como objeto quanto JSON.
+  if (
+    table === 'user_preferences'
+    && result.accessibility_settings_json
+    && typeof result.accessibility_settings_json !== 'string'
+  ) {
+    result.accessibility_settings_json = JSON.stringify(result.accessibility_settings_json);
   }
 
   return result;
