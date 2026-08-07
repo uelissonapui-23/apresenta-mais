@@ -46,12 +46,16 @@ export const authProvider = {
       options: { data: { full_name: full_name || name || '' } },
     });
     throwIfError(error);
+    const session = data?.session || null;
+    const user = normalizeSupabaseUser(data?.user);
+    const requiresVerification = Boolean(user && !session);
+
     return {
-      user: normalizeSupabaseUser(data?.user),
-      session: data?.session || null,
-      requires_verification: Boolean(data?.user && !data?.session),
-      verification_required: Boolean(data?.user && !data?.session),
-      email_verified: Boolean(data?.session),
+      user,
+      session,
+      requires_verification: requiresVerification,
+      verification_required: requiresVerification,
+      email_verified: Boolean(session || data?.user?.email_confirmed_at),
     };
   },
 

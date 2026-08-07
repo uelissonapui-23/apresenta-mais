@@ -916,52 +916,54 @@ export default function Register() {
       |--------------------------------------------------------------------------
       */
 
-      const verificationRequired = (
-        result?.verification_required !== false
-        && result?.email_verified !== true
-        && result?.user?.email_verified !== true
+      const hasActiveSession = Boolean(result?.session);
+      const verificationRequired = Boolean(
+        result?.requires_verification
+        || result?.verification_required,
       );
 
-      if (!verificationRequired) {
-        try {
-          await authProvider.loginViaEmailPassword(
-            normalizedEmail,
-            form.password,
-          );
-        } catch (loginError) {
-          console.warn(
-            'Conta criada, mas o login automático não foi concluído:',
-            loginError,
-          );
-        }
-
+      /*
+      |--------------------------------------------------------------------------
+      | Cadastro simples: quando o Supabase está com “Confirm email” desligado,
+      | signUp já devolve uma sessão. Não fazemos um segundo login aqui, pois isso
+      | evita corrida de sessão e mensagens falsas de senha inválida logo após o
+      | cadastro.
+      |--------------------------------------------------------------------------
+      */
+      if (hasActiveSession && !verificationRequired) {
         try {
           await refreshAuth?.();
         } catch (refreshError) {
           console.warn(
-            'Não foi possível atualizar a sessão imediatamente:',
+            'A conta foi criada, mas o contexto não pôde ser atualizado imediatamente:',
             refreshError,
           );
         }
 
-        safeSessionRemove(
-          REGISTER_EMAIL_KEY,
-        );
+        safeSessionRemove(REGISTER_EMAIL_KEY);
+
+        toast({
+          title: 'Conta criada',
+          description: 'Seu cadastro foi concluído com sucesso.',
+        });
 
         window.location.assign('/onboarding');
         return;
       }
 
+      /*
+      | Mantemos compatibilidade com confirmação por OTP para o futuro. Quando
+      | um SMTP próprio for configurado e “Confirm email” for reativado, esta
+      | mesma tela volta a funcionar sem outra migração.
+      */
       setOtpCode('');
-      setResendSeconds(
-        RESEND_COOLDOWN_SECONDS,
-      );
+      setResendSeconds(RESEND_COOLDOWN_SECONDS);
       setStep('verification');
 
       toast({
-        title: 'Código enviado',
+        title: 'Confirmação necessária',
         description:
-          'Confira sua caixa de entrada para confirmar o cadastro.',
+          'A conta foi criada e está aguardando a confirmação do e-mail.',
       });
     } catch (registerError) {
       console.error(
