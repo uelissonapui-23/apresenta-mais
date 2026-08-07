@@ -19,6 +19,9 @@ const MIGRATED_TABLES = Object.freeze({
   PresentationTag: 'presentation_tags',
   BlockAttachment: 'block_attachments',
   BlockReference: 'block_references',
+  PresentationTemplate: 'presentation_templates',
+  TemplateBlock: 'template_blocks',
+  PresentationVersion: 'presentation_versions',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({
@@ -68,6 +71,19 @@ const NULLABLE_UUID_FIELDS = Object.freeze({
     'presentation_type_id',
     'objective_id',
     'communication_style_id',
+  ]),
+  presentation_templates: new Set([
+    'owner_user_id',
+    'presentation_type_id',
+    'objective_id',
+    'communication_style_id',
+  ]),
+  template_blocks: new Set([
+    'parent_id',
+    'block_type_id',
+  ]),
+  presentation_versions: new Set([
+    'created_by',
   ]),
 });
 

@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import { backendConfig } from '@/lib/backendConfig';
 import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
@@ -548,7 +549,9 @@ export default function Templates() {
           { active: true },
           'name',
         ),
-        profile?.plan_id && isProfilePlanActive(profile)
+        backendConfig.features.paidPlans
+          && profile?.plan_id
+          && isProfilePlanActive(profile)
           ? base44.entities.Plan.filter({
               id: profile.plan_id,
             })
@@ -730,7 +733,8 @@ export default function Templates() {
   ]);
 
   const canUsePremiumTemplates = Boolean(
-    isAdmin
+    !backendConfig.features.paidPlans
+    || isAdmin
     || (
       isProfilePlanActive(profile)
       && currentPlan?.can_use_premium_templates === true
@@ -931,7 +935,8 @@ export default function Templates() {
       const maxPresentations = Number(currentPlan?.max_presentations);
 
       if (
-        isProfilePlanActive(profile)
+        backendConfig.features.paidPlans
+        && isProfilePlanActive(profile)
         && Number.isFinite(maxPresentations)
         && maxPresentations >= 0
       ) {
