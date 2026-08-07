@@ -2,60 +2,67 @@ name: Atualizar Supabase em produção
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
       - 'supabase/migrations/**'
-      - 'supabase/config.toml'
+      - 'scripts/apply-apresenta-migrations.sh'
       - '.github/workflows/deploy-supabase-production.yml'
   workflow_dispatch:
 
 concurrency:
-  group: apresenta-supabase-production
+  group: apresenta-mais-supabase-production
   cancel-in-progress: false
 
 jobs:
   deploy-database:
-    name: Aplicar migrations no Supabase
+    name: Aplicar migrations do Apresenta Mais
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
     env:
-      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      PGSSLMODE: require
 
     steps:
       - name: Baixar projeto
         uses: actions/checkout@v4
 
-      # Fixado em uma versão estável para evitar regressões de versões
-      # beta/latest da CLI na leitura das chaves da Management API.
-      - name: Instalar Supabase CLI
-        uses: supabase/setup-cli@v1
-        with:
-          version: 2.101.0
-
-      - name: Mostrar versão da Supabase CLI
-        run: supabase --version
-
-      - name: Validar secrets
+      - name: Validar conexão configurada
         shell: bash
         run: |
-          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "SUPABASE_ACCESS_TOKEN ausente"; exit 1; }
-          test -n "$SUPABASE_DB_PASSWORD" || { echo "SUPABASE_DB_PASSWORD ausente"; exit 1; }
-          test -n "$SUPABASE_PROJECT_ID" || { echo "SUPABASE_PROJECT_ID ausente"; exit 1; }
+          test -n "$SUPABASE_DB_URL" || {
+            echo "SUPABASE_DB_URL não configurado nos secrets do GitHub."
+            exit 1
+          }
 
-      - name: Vincular projeto
+      - name: Instalar cliente PostgreSQL
         shell: bash
         run: |
-          set -euo pipefail
-          supabase link --project-ref "$SUPABASE_PROJECT_ID"
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+          psql --version
 
-      - name: Aplicar migrations novas
+      - name: Testar conexão com o banco
         shell: bash
         run: |
           set -euo pipefail
-          supabase db push
+          psql "$SUPABASE_DB_URL" \
+            -v ON_ERROR_STOP=1 \
+            -X \
+            -c "select current_database() as database, current_user as connected_as;"
 
-      - name: Conferir histórico
-        run: supabase migration list
+      - name: Aplicar migrations isoladas do Apresenta Mais
+        shell: bash
+        run: |
+          chmod +x scripts/apply-apresenta-migrations.sh
+          scripts/apply-apresenta-migrations.sh
+
+      - name: Conferir migrations do Apresenta Mais
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$SUPABASE_DB_URL" \
+            -v ON_ERROR_STOP=1 \
+            -X \
+            -c "select version, applied_at from apresenta_mais._migration_history order by version;"
