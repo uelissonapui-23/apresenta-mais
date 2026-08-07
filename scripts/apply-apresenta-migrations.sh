@@ -36,20 +36,24 @@ fi
 IFS=$'\n' migration_files=($(printf '%s\n' "${migration_files[@]}" | sort))
 unset IFS
 
+sql_escape_literal() {
+  # SQL string literal escaping: ' -> ''
+  printf "%s" "$1" | sed "s/'/''/g"
+}
+
 for migration in "${migration_files[@]}"; do
   version="$(basename "$migration")"
+  version_sql="$(sql_escape_literal "$version")"
 
-  # Passa o nome da migration como literal SQL seguro via psql.
   already_applied="$(
     psql "$SUPABASE_DB_URL" \
       -v ON_ERROR_STOP=1 \
       -X \
       -tA \
-      -v "migration_version=$version" \
       -c "select exists (
             select 1
             from apresenta_mais._migration_history
-            where version = :'migration_version'
+            where version = '${version_sql}'
           );"
   )"
 
@@ -68,9 +72,8 @@ for migration in "${migration_files[@]}"; do
   psql "$SUPABASE_DB_URL" \
     -v ON_ERROR_STOP=1 \
     -X \
-    -v "migration_version=$version" \
     -c "insert into apresenta_mais._migration_history(version)
-        values (:'migration_version')
+        values ('${version_sql}')
         on conflict (version) do nothing;"
 
   echo "✓ $version aplicada e registrada."
