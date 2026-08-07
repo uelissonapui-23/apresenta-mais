@@ -6,6 +6,7 @@ const MIGRATED_TABLES = Object.freeze({
   PresentationType: 'presentation_types',
   PresentationObjective: 'presentation_objectives',
   CommunicationStyle: 'communication_styles',
+  PresentationStyle: 'communication_styles',
   PresentationTheme: 'presentation_themes',
   BlockType: 'block_types',
   UserPreference: 'user_preferences',

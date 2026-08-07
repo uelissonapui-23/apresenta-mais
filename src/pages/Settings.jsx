@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import { backendConfig } from '@/lib/backendConfig';
 import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -557,7 +558,7 @@ export default function Settings() {
           { active: true },
           'name',
         ),
-        profile?.plan_id && isProfilePlanActive(profile)
+        backendConfig.features.paidPlans && profile?.plan_id && isProfilePlanActive(profile)
           ? base44.entities.Plan.filter({
               id: profile.plan_id,
             })

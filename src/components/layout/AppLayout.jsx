@@ -43,7 +43,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { authProvider } from '@/services/authProvider';
+import { backendConfig } from '@/lib/backendConfig';
 import useCurrentUser from '@/hooks/useCurrentUser';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -132,26 +132,31 @@ const ADMIN_NAV_ITEMS = [
     label: 'Planos',
     path: '/admin/plans',
     icon: ShieldCheck,
+    enabled: backendConfig.features.paidPlans,
   },
   {
     label: 'Solicitações',
     path: '/admin/plan-requests',
     icon: CreditCard,
+    enabled: backendConfig.features.paidPlans,
   },
   {
     label: 'Apoios',
     path: '/admin/support-contributions',
     icon: Heart,
+    enabled: backendConfig.features.supporterPlan,
   },
   {
     label: 'Anúncios',
     path: '/admin/ads',
     icon: Megaphone,
+    enabled: backendConfig.features.ads,
   },
   {
     label: 'Pagamentos',
     path: '/admin/payment-config',
     icon: CreditCard,
+    enabled: backendConfig.features.paidPlans || backendConfig.features.supporterPlan,
   },
   {
     label: 'Tipos',
@@ -495,7 +500,7 @@ function Sidebar({
               )}
 
               <div className="space-y-1">
-                {ADMIN_NAV_ITEMS.map((item) => (
+                {ADMIN_NAV_ITEMS.filter((item) => item.enabled !== false).map((item) => (
                   <NavItem
                     key={item.path}
                     item={item}
@@ -804,7 +809,7 @@ function MobileDrawer({
               </p>
 
               <div className="space-y-1">
-                {ADMIN_NAV_ITEMS.map((item) => (
+                {ADMIN_NAV_ITEMS.filter((item) => item.enabled !== false).map((item) => (
                   <NavItem
                     key={item.path}
                     item={item}
@@ -937,6 +942,7 @@ export default function AppLayout() {
     user,
     profile,
     loading,
+    logout,
   } = useCurrentUser();
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -974,7 +980,9 @@ export default function AppLayout() {
     setLoggingOut(true);
 
     try {
-      await authProvider.logout();
+      // Limpa o estado de autenticação e o cache compartilhado primeiro.
+      // O Home pode ter requisições em voo; ele ignora resultados após desmontar.
+      await logout(false);
 
       navigate('/login', {
         replace: true,

@@ -27,6 +27,7 @@ import ScrollToTop from '@/components/ScrollToTop';
 
 import AppLayout from '@/components/layout/AppLayout';
 import PageNotFound from '@/lib/PageNotFound';
+import { backendConfig } from '@/lib/backendConfig';
 
 /*
 |--------------------------------------------------------------------------
@@ -410,7 +411,11 @@ function AppRoutes() {
 
             <Route
               path="/my-plan"
-              element={<MyPlan />}
+              element={
+                backendConfig.features.paidPlans || backendConfig.features.supporterPlan
+                  ? <MyPlan />
+                  : <Navigate to="/settings" replace />
+              }
             />
 
             {/*

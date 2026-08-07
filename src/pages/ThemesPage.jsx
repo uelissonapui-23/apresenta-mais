@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import { backendConfig } from '@/lib/backendConfig';
 import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
 import { Badge } from '@/components/ui/badge';
@@ -345,7 +346,7 @@ export default function ThemesPage() {
         base44.entities.UserPreference.filter({
           user_id: user.id,
         }),
-        profile?.plan_id && isProfilePlanActive(profile)
+        backendConfig.features.paidPlans && profile?.plan_id && isProfilePlanActive(profile)
           ? base44.entities.Plan.filter({
               id: profile.plan_id,
             })
@@ -500,7 +501,7 @@ export default function ThemesPage() {
           'Confira os planos que liberam temas premium.',
       });
 
-      window.location.href = '/my-plan';
+      window.location.href = backendConfig.features.paidPlans ? '/my-plan' : '/settings';
       return;
     }
 
@@ -581,7 +582,7 @@ export default function ThemesPage() {
           'Confira os planos que liberam temas premium.',
       });
 
-      window.location.href = '/my-plan';
+      window.location.href = backendConfig.features.paidPlans ? '/my-plan' : '/settings';
       return;
     }
 

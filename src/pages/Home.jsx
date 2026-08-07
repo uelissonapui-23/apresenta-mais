@@ -655,6 +655,14 @@ export default function Home() {
 
   const loadingLockRef = useRef(false);
   const favoriteLocksRef = useRef(new Set());
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const loadDashboard = useCallback(
     async ({ silent = false } = {}) => {
@@ -669,7 +677,7 @@ export default function Home() {
         setSessions([]);
         setTemplates([]);
         setPreferences(null);
-        setLoadError('Entre na sua conta para acessar o painel.');
+        setLoadError('');
         setLoading(false);
         setRefreshing(false);
         return;
@@ -791,25 +799,33 @@ export default function Home() {
           selectCurrentRecord(preferenceRows),
         );
       } catch (error) {
-        console.error(
-          'Erro ao carregar dashboard:',
-          error,
-        );
+        // Ao sair da conta, as requisições que já estavam em voo podem receber
+        // 401/403 depois que a sessão foi encerrada. Isso não é falha do painel.
+        if (!mountedRef.current) {
+          return;
+        }
 
-        setLoadError(
-          'Não foi possível carregar seu painel agora.',
-        );
+        const status = error?.status || error?.response?.status || error?.code;
+        const authEnded = status === 401 || status === 403 || status === 'PGRST301';
 
+        if (authEnded) {
+          setLoadError('');
+          return;
+        }
+
+        console.error('Erro ao carregar dashboard:', error);
+        setLoadError('Não foi possível carregar seu painel agora.');
         toast({
           title: 'Falha ao carregar o painel',
-          description:
-            'Confira sua conexão e tente novamente.',
+          description: 'Confira sua conexão e tente novamente.',
           variant: 'destructive',
         });
       } finally {
         loadingLockRef.current = false;
-        setLoading(false);
-        setRefreshing(false);
+        if (mountedRef.current) {
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     },
     [
