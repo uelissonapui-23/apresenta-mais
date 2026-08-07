@@ -1,0 +1,36 @@
+APRESENTA+ — ETAPA 2: AUTENTICAÇÃO E PERFIL NO SUPABASE
+
+O que foi preparado
+- Camada de autenticação compatível com Base44/Supabase.
+- Login por e-mail/senha via Supabase quando VITE_BACKEND_PROVIDER=supabase.
+- Cadastro, confirmação por OTP, recuperação e troca de senha preparados.
+- Logout centralizado para funcionar nos dois backends.
+- Perfil passa a usar apresenta_mais.profiles no modo Supabase.
+- Migration adiciona telefone, criação automática de perfil e corrige a segurança
+  da atualização do perfil para impedir alteração do campo role pelo usuário.
+- As apresentações e demais entidades CONTINUAM no Base44 nesta etapa.
+- Com VITE_BACKEND_PROVIDER=base44, o comportamento atual é preservado.
+
+IMPORTANTE
+1. Extraia este ZIP na raiz do projeto e aceite substituir.
+2. NÃO mude VITE_BACKEND_PROVIDER para supabase ainda.
+3. Faça o commit/push para o GitHub. O workflow aplicará a nova migration.
+4. Depois confirme no Supabase que a migration ficou verde.
+5. Antes de ativar o frontend Supabase, confirme em Supabase > Settings > Data API
+   que o schema "apresenta_mais" está na lista de schemas expostos.
+6. Só depois da validação mudaremos VITE_BACKEND_PROVIDER para supabase.
+
+COMANDOS
+git add src supabase/migrations/20260807141000_auth_profile_supabase.sql
+git commit -m "Prepara autenticacao e perfil no Supabase"
+git push origin main
+
+VALIDAÇÃO LOCAL
+npm run build
+npm run typecheck
+npm run lint
+
+Observação da preparação:
+A validação completa de build não pôde ser executada no ambiente de geração
+porque uma dependência do registry interno (zwitch@2.0.4) não estava disponível.
+O projeto deve ser validado normalmente no seu ambiente/Actions após a extração.

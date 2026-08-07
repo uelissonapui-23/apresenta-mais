@@ -1,26 +1,18 @@
-import { base44 } from '@/api/base44Client';
-import { backendConfig } from '@/lib/backendConfig';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 
 export async function getUserPreference(userId) {
   if (!userId) return null;
-  if (backendConfig.provider !== 'supabase') {
-    const rows = await base44.entities.UserPreference.filter({ user_id: userId }, '-updated_date', 1);
-    return Array.isArray(rows) ? rows[0] || null : null;
-  }
-  const { data, error } = await getSupabaseClient().from('user_preferences').select('*').eq('user_id', userId).maybeSingle();
+  const { data, error } = await getSupabaseClient()
+    .from('user_preferences')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
   if (error) throw error;
   return data;
 }
 
 export async function saveUserPreference(userId, payload = {}) {
   if (!userId) throw new Error('Usuário não autenticado.');
-  if (backendConfig.provider !== 'supabase') {
-    const rows = await base44.entities.UserPreference.filter({ user_id: userId }, '-updated_date', 1);
-    const current = Array.isArray(rows) ? rows[0] : null;
-    const next = { ...payload, user_id: userId }; delete next.id;
-    return current?.id ? base44.entities.UserPreference.update(current.id, next) : base44.entities.UserPreference.create(next);
-  }
   const next = {
     user_id: userId,
     default_view_mode: payload.default_view_mode || 'structure',
@@ -33,9 +25,15 @@ export async function saveUserPreference(userId, payload = {}) {
     show_progress: payload.show_progress !== false,
     auto_mark_completed: payload.auto_mark_completed !== false,
     confirm_before_restart: payload.confirm_before_restart !== false,
-    accessibility_settings_json: payload.accessibility_settings_json || '{}',
+    accessibility_settings_json: typeof payload.accessibility_settings_json === 'string'
+      ? payload.accessibility_settings_json
+      : JSON.stringify(payload.accessibility_settings_json || {}),
   };
-  const { data, error } = await getSupabaseClient().from('user_preferences').upsert(next, { onConflict: 'user_id' }).select('*').single();
+  const { data, error } = await getSupabaseClient()
+    .from('user_preferences')
+    .upsert(next, { onConflict: 'user_id' })
+    .select('*')
+    .single();
   if (error) throw error;
   return data;
 }

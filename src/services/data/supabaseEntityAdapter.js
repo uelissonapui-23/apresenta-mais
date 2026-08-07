@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { supabase } from '@/lib/supabaseClient';
 
 const MIGRATED_TABLES = Object.freeze({
@@ -24,6 +25,7 @@ const MIGRATED_TABLES = Object.freeze({
   TemplateBlock: 'template_blocks',
   PresentationVersion: 'presentation_versions',
   AppTip: 'app_tips',
+  UserProfile: 'profiles',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({
@@ -45,14 +47,22 @@ function normalizeSort(sort) {
   };
 }
 
-function normalizeRow(row) {
+function normalizeRow(row, table = '') {
   if (!row || typeof row !== 'object') return row;
 
-  return {
+  const normalized = {
     ...row,
     created_date: row.created_at || row.created_date || null,
     updated_date: row.updated_at || row.updated_date || null,
   };
+
+  if (table === 'profiles') {
+    normalized.user_id = row.id;
+    normalized.name = row.full_name || '';
+    normalized.active = row.account_status !== 'inactive';
+  }
+
+  return normalized;
 }
 
 const NULLABLE_UUID_FIELDS = Object.freeze({
@@ -89,6 +99,25 @@ const NULLABLE_UUID_FIELDS = Object.freeze({
   ]),
 });
 
+const ENTITY_FIELD_MAPS = Object.freeze({
+  profiles: Object.freeze({
+    user_id: 'id',
+    name: 'full_name',
+    active: 'account_status',
+  }),
+});
+
+function mapFieldName(table, field) {
+  return ENTITY_FIELD_MAPS[table]?.[field] || field;
+}
+
+function mapFieldValue(table, field, value) {
+  if (table === 'profiles' && field === 'active') {
+    return value === false ? 'inactive' : 'active';
+  }
+  return value;
+}
+
 const NULLABLE_TIMESTAMP_FIELDS = Object.freeze({
   presentation_sessions: new Set([
     'paused_at',
@@ -111,6 +140,23 @@ function normalizePayload(payload = {}, table = '') {
   // Campos calculados/legados que nunca devem ser enviados ao banco.
   delete result.created_by;
   delete result.updated_by;
+
+  if (table === 'profiles') {
+    if ('user_id' in result && !('id' in result)) result.id = result.user_id;
+    if ('name' in result && !('full_name' in result)) result.full_name = result.name;
+    if ('active' in result && !('account_status' in result)) {
+      result.account_status = result.active === false ? 'inactive' : 'active';
+    }
+
+    delete result.user_id;
+    delete result.name;
+    delete result.active;
+
+    [
+      'plan_id', 'plan_start_date', 'plan_expires_at', 'plan_status',
+      'plan_changed_at', 'plan_changed_by', 'supporter',
+    ].forEach((field) => delete result[field]);
+  }
 
   // O Base44 aceitava string vazia em relacionamentos opcionais. No Postgres,
   // colunas UUID aceitam UUID válido ou NULL, nunca ''. Normalizamos aqui para
@@ -148,11 +194,13 @@ function normalizePayload(payload = {}, table = '') {
   return result;
 }
 
-function applyFilters(query, filters = {}) {
+function applyFilters(query, filters = {}, table = '') {
   let next = query;
 
   Object.entries(filters || {}).forEach(([key, value]) => {
-    const column = SYSTEM_FIELD_MAP[key] || key;
+    const requestedColumn = SYSTEM_FIELD_MAP[key] || key;
+    const column = mapFieldName(table, requestedColumn);
+    const mappedValue = mapFieldValue(table, key, value);
 
     if (value === undefined) return;
 
@@ -162,11 +210,11 @@ function applyFilters(query, filters = {}) {
     }
 
     if (Array.isArray(value)) {
-      next = next.in(column, value);
+      next = next.in(column, value.map((item) => mapFieldValue(table, key, item)));
       return;
     }
 
-    next = next.eq(column, value);
+    next = next.eq(column, mappedValue);
   });
 
   return next;
@@ -210,12 +258,12 @@ function createAdapter(table) {
       }
 
       const { data, error } = await query;
-      return ensureResult(data, error)?.map(normalizeRow) || [];
+      return ensureResult(data, error)?.map((row) => normalizeRow(row, table)) || [];
     },
 
     async filter(filters = {}, sort, limit) {
       let query = supabase.from(table).select('*');
-      query = applyFilters(query, filters);
+      query = applyFilters(query, filters, table);
 
       const order = normalizeSort(sort);
       if (order) {
@@ -230,7 +278,7 @@ function createAdapter(table) {
       }
 
       const { data, error } = await query;
-      return ensureResult(data, error)?.map(normalizeRow) || [];
+      return ensureResult(data, error)?.map((row) => normalizeRow(row, table)) || [];
     },
 
     async get(id) {
@@ -240,7 +288,7 @@ function createAdapter(table) {
         .eq('id', id)
         .single();
 
-      return normalizeRow(ensureResult(data, error));
+      return normalizeRow(ensureResult(data, error), table);
     },
 
     async create(payload) {
@@ -250,7 +298,7 @@ function createAdapter(table) {
         .select('*')
         .single();
 
-      return normalizeRow(ensureResult(data, error));
+      return normalizeRow(ensureResult(data, error), table);
     },
 
     async bulkCreate(rows = []) {
@@ -261,7 +309,7 @@ function createAdapter(table) {
         .insert(rows.map((row) => normalizePayload(row, table)))
         .select('*');
 
-      return ensureResult(data, error)?.map(normalizeRow) || [];
+      return ensureResult(data, error)?.map((row) => normalizeRow(row, table)) || [];
     },
 
     async update(id, updates) {
@@ -272,7 +320,7 @@ function createAdapter(table) {
         .select('*')
         .single();
 
-      return normalizeRow(ensureResult(data, error));
+      return normalizeRow(ensureResult(data, error), table);
     },
 
     async delete(id) {

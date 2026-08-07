@@ -1,0 +1,53 @@
+APRESENTA+ — CORREÇÃO DO MODO ENSAIO
+
+CAUSA CONFIRMADA
+O Console mostrou:
+POST /api/apps/undefined/.../PresentationSession -> 405
+Base44Error: Request failed with status code 405
+
+Isso acontece porque PresentationSession e SessionBlockProgress ainda estavam
+indo para o Base44, enquanto a apresentação/blocos já estão no Supabase.
+
+CORREÇÃO
+- PresentationSession -> apresenta_mais.presentation_sessions
+- SessionBlockProgress -> apresenta_mais.session_block_progress
+- UserPreference também passa pelo adapter Supabase nas telas legadas
+- normalização de datas vazias ('') para NULL
+- RLS garante que cada usuário acesse somente sessões das próprias apresentações
+- progresso de bloco só pode existir em sessão/apresentação do próprio usuário
+
+APLICAÇÃO
+Extraia este ZIP na raiz do projeto.
+
+Depois:
+
+git add src/services/data/supabaseEntityAdapter.js supabase/migrations/20260807195000_sessions_rehearsal_supabase.sql
+git commit -m "Migra sessoes de ensaio para Supabase"
+git push origin main
+
+Aguarde:
+1. GitHub Actions verde.
+2. Vercel verde.
+
+DATA API
+Confirme que ficaram expostas:
+- apresenta_mais.presentation_sessions
+- apresenta_mais.session_block_progress
+
+Não exponha _migration_history.
+
+TESTE
+1. Abra a apresentação criada.
+2. Entre em Modo ensaio.
+3. Clique Iniciar ensaio.
+4. Marque um tópico concluído.
+5. Pause e continue.
+6. Atualize a página.
+7. Confirme que a sessão pode ser retomada.
+8. Finalize e confira o histórico/tempo praticado.
+
+OBSERVAÇÃO
+Erros 405 de /api/apps/undefined/analytics/track/batch podem ainda aparecer
+enquanto o restante do Base44 não for completamente removido. Eles não devem
+mais bloquear o ensaio. A remoção completa do SDK/analytics será feita após
+migrarmos as entidades restantes.

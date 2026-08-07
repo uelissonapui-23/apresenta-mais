@@ -1,8 +1,4 @@
-import { base44 } from '@/api/base44Client';
-import { backendConfig } from '@/lib/backendConfig';
 import { getSupabaseClient } from '@/lib/supabaseClient';
-
-const usingSupabase = () => backendConfig.provider === 'supabase';
 
 function normalizeSupabaseUser(user) {
   if (!user) return null;
@@ -19,27 +15,23 @@ function normalizeSupabaseUser(user) {
   };
 }
 
-function throwIfError(error) {
-  if (error) throw error;
-}
+function throwIfError(error) { if (error) throw error; }
 
 export const authProvider = {
   async me() {
-    if (!usingSupabase()) return base44.auth.me();
     const { data, error } = await getSupabaseClient().auth.getUser();
+    if (error?.name === 'AuthSessionMissingError') return null;
     throwIfError(error);
     return normalizeSupabaseUser(data?.user);
   },
 
   async loginViaEmailPassword(email, password) {
-    if (!usingSupabase()) return base44.auth.loginViaEmailPassword(email, password);
     const { data, error } = await getSupabaseClient().auth.signInWithPassword({ email, password });
     throwIfError(error);
     return normalizeSupabaseUser(data?.user);
   },
 
-  async register({ email, password, full_name, name, ...rest }) {
-    if (!usingSupabase()) return base44.auth.register({ email, password, full_name, name, ...rest });
+  async register({ email, password, full_name, name }) {
     const { data, error } = await getSupabaseClient().auth.signUp({
       email,
       password,
@@ -49,7 +41,6 @@ export const authProvider = {
     const session = data?.session || null;
     const user = normalizeSupabaseUser(data?.user);
     const requiresVerification = Boolean(user && !session);
-
     return {
       user,
       session,
@@ -60,7 +51,6 @@ export const authProvider = {
   },
 
   async verifyOtp({ email, token, code }) {
-    if (!usingSupabase()) return base44.auth.verifyOtp({ email, token, code });
     const { data, error } = await getSupabaseClient().auth.verifyOtp({
       email,
       token: token || code,
@@ -71,14 +61,12 @@ export const authProvider = {
   },
 
   async resendOtp({ email }) {
-    if (!usingSupabase()) return base44.auth.resendOtp({ email });
     const { data, error } = await getSupabaseClient().auth.resend({ type: 'signup', email });
     throwIfError(error);
     return data;
   },
 
   async loginWithProvider(provider, callbackUrl) {
-    if (!usingSupabase()) return base44.auth.loginWithProvider(provider, callbackUrl);
     const { data, error } = await getSupabaseClient().auth.signInWithOAuth({
       provider,
       options: { redirectTo: callbackUrl },
@@ -88,36 +76,29 @@ export const authProvider = {
   },
 
   async resetPasswordRequest(email) {
-    if (!usingSupabase()) return base44.auth.resetPasswordRequest(email);
     const redirectTo = `${window.location.origin}/reset-password`;
     const { data, error } = await getSupabaseClient().auth.resetPasswordForEmail(email, { redirectTo });
     throwIfError(error);
     return data;
   },
 
-  async resetPassword({ resetToken, newPassword }) {
-    if (!usingSupabase()) return base44.auth.resetPassword({ resetToken, newPassword });
-    // No Supabase, o link de recuperação cria a sessão de recovery ao retornar ao app.
+  async resetPassword({ newPassword }) {
     const { data, error } = await getSupabaseClient().auth.updateUser({ password: newPassword });
     throwIfError(error);
     return data;
   },
 
   async logout(destination) {
-    if (!usingSupabase()) return base44.auth.logout(destination);
     const { error } = await getSupabaseClient().auth.signOut();
     throwIfError(error);
     if (destination) window.location.assign(destination);
   },
 
   redirectToLogin(returnUrl) {
-    if (!usingSupabase()) return base44.auth.redirectToLogin(returnUrl);
     const url = new URL('/login', window.location.origin);
     if (returnUrl) url.searchParams.set('returnUrl', returnUrl);
     window.location.assign(url.toString());
   },
 };
 
-export function isSupabaseAuthActive() {
-  return usingSupabase();
-}
+export function isSupabaseAuthActive() { return true; }

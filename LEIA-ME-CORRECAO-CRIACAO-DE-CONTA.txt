@@ -1,0 +1,48 @@
+APRESENTA+ — CORREÇÃO DA CRIAÇÃO DE CONTA
+
+OBJETIVO
+- Criar conta por e-mail e senha sem depender de código por e-mail agora.
+- Evitar um segundo login desnecessário logo após o signUp do Supabase.
+- Manter o fluxo OTP preparado para o futuro, quando houver SMTP próprio.
+
+ARQUIVOS ALTERADOS
+- src/pages/Register.jsx
+- src/services/authProvider.js
+
+PASSO 1 — EXTRAIR
+Extraia o ZIP diretamente na raiz do projeto e aceite substituir os arquivos.
+
+PASSO 2 — SUPABASE (OBRIGATÓRIO PARA CADASTRO SEM E-MAIL)
+No painel do Supabase, abra Authentication > Providers / Sign In > Email.
+Desative a exigência de confirmação de e-mail ("Confirm email").
+Salve.
+
+IMPORTANTE
+Esta configuração é do Supabase Auth e não pode ser desligada apenas pelo
+frontend. Enquanto ela permanecer ativa, o Supabase cria a conta sem sessão e
+exige confirmação por e-mail.
+
+Para o Apresenta+ agora, a recomendação é deixar a confirmação desligada.
+Quando um SMTP próprio for configurado no futuro, podemos reativá-la.
+
+PASSO 3 — CONTA DE TESTE ANTIGA
+Se você já criou uma conta de teste que ficou sem confirmar, o mais seguro é
+removê-la em Authentication > Users e criar novamente depois de desativar
+"Confirm email".
+
+PASSO 4 — PUBLICAR
+Execute:
+
+git add src/pages/Register.jsx src/services/authProvider.js
+git commit -m "Corrige criacao de conta no Supabase"
+git push origin main
+
+O Vercel fará o deploy automaticamente.
+
+PASSO 5 — TESTE
+1. Abra o app publicado em janela anônima.
+2. Clique em Criar conta gratuitamente.
+3. Informe e-mail e senha.
+4. A conta deve entrar imediatamente e abrir o onboarding.
+5. Saia da conta.
+6. Entre novamente com o mesmo e-mail e senha.

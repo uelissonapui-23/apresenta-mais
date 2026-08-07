@@ -1,5 +1,3 @@
-import { base44 } from '@/api/base44Client';
-import { backendConfig } from '@/lib/backendConfig';
 import { getSupabaseClient } from '@/lib/supabaseClient';
 
 function mapSupabaseProfile(row) {
@@ -14,10 +12,6 @@ function mapSupabaseProfile(row) {
 
 export async function getUserProfile(userId) {
   if (!userId) return null;
-  if (backendConfig.provider !== 'supabase') {
-    const rows = await base44.entities.UserProfile.filter({ user_id: userId });
-    return Array.isArray(rows) ? rows[0] || null : null;
-  }
   const { data, error } = await getSupabaseClient()
     .from('profiles')
     .select('*')
@@ -29,12 +23,6 @@ export async function getUserProfile(userId) {
 
 export async function saveUserProfile(userId, payload) {
   if (!userId) throw new Error('Usuário não autenticado.');
-  if (backendConfig.provider !== 'supabase') {
-    const rows = await base44.entities.UserProfile.filter({ user_id: userId });
-    const current = Array.isArray(rows) ? rows[0] : null;
-    if (current?.id) return base44.entities.UserProfile.update(current.id, payload);
-    return base44.entities.UserProfile.create({ user_id: userId, ...payload });
-  }
 
   const supabasePayload = {
     id: userId,

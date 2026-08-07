@@ -1,0 +1,67 @@
+APRESENTA+ — ETAPA 3: APRESENTAÇÕES E BLOCOS NO SUPABASE
+
+Esta etapa migra o núcleo de criação e edição sem reescrever as páginas.
+
+MIGRADO PARA SUPABASE
+- Presentation
+- PresentationBlock
+- PresentationType
+- PresentationObjective
+- CommunicationStyle
+- PresentationTheme
+- BlockType
+
+COMO FUNCIONA
+O arquivo src/api/base44Client.js agora possui uma camada de compatibilidade:
+quando VITE_BACKEND_PROVIDER=supabase, somente as entidades acima são desviadas
+para o Supabase. As entidades ainda não migradas continuam no caminho legado.
+Isso reduz alterações nas páginas e o risco de regressão.
+
+SEGURANÇA
+- Apresentações: somente o dono lê, cria, altera e exclui.
+- Blocos: somente o dono da apresentação acessa.
+- Catálogos: usuários autenticados leem; somente admin pode alterar.
+- Nenhuma tabela de outros apps do projeto Supabase é modificada.
+
+CATÁLOGOS INICIAIS
+A migration cria tipos, objetivos, estilos, temas e tipos de bloco mínimos para
+o "Criar do zero" funcionar sem depender desses catálogos do Base44.
+
+IMPORTANTE
+O fluxo guiado ("Criar com ajuda") ainda possui entidades próprias
+GuidedFlow / GuidedQuestion / GuidedAnswer. Ele será simplificado e migrado na
+próxima etapa, conforme planejado.
+
+APLICAÇÃO
+1. Extraia este ZIP na raiz e aceite substituir.
+2. Execute:
+
+git add src/api/base44Client.js src/services/data/supabaseEntityAdapter.js supabase/migrations/20260807193000_core_presentations_supabase.sql
+git commit -m "Migra apresentacoes e blocos para Supabase"
+git push origin main
+
+3. Aguarde GitHub Actions e Vercel ficarem verdes.
+
+4. Em Supabase > Data API > Exposed tables confirme que estas tabelas estão expostas:
+- apresenta_mais.presentation_types
+- apresenta_mais.presentation_objectives
+- apresenta_mais.communication_styles
+- apresenta_mais.presentation_themes
+- apresenta_mais.block_types
+- apresenta_mais.presentations
+- apresenta_mais.presentation_blocks
+
+Se "Automatically expose new tables" continuar ativado, devem aparecer
+automaticamente. Não exponha _migration_history.
+
+TESTE
+- Criar do zero
+- Abrir editor
+- Criar 3 tópicos
+- Editar títulos/conteúdo
+- Reordenar
+- Atualizar a página (Ctrl+F5)
+- Confirmar persistência
+- Favoritar a apresentação
+- Sair e entrar novamente
+- Confirmar que a apresentação continua lá

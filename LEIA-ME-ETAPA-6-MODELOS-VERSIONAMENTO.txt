@@ -1,0 +1,69 @@
+APRESENTA+ — ETAPA 6: MODELOS/TEMPLATES + VERSIONAMENTO
+
+MIGRADO PARA SUPABASE
+- PresentationTemplate -> apresenta_mais.presentation_templates
+- TemplateBlock -> apresenta_mais.template_blocks
+- PresentationVersion -> apresenta_mais.presentation_versions
+
+MELHORIA IMPORTANTE
+A monetização continua DESLIGADA. Por isso, a tela de modelos agora não tenta
+consultar Plan no Base44 quando VITE_FEATURE_PAID_PLANS=false e não bloqueia
+modelo premium enquanto a funcionalidade de planos estiver desativada.
+
+Isso mantém o app simples agora e deixa o caminho preparado para planos no futuro.
+
+MODELOS INICIAIS
+A migration cria três modelos oficiais gratuitos:
+- Palestra essencial
+- Pregação simples
+- Aula objetiva
+
+SEGURANÇA
+- modelos públicos/oficiais podem ser lidos por usuários autenticados;
+- modelos privados só aparecem ao dono;
+- usuário pode alterar apenas os próprios modelos;
+- admin pode administrar modelos oficiais;
+- blocos herdam a permissão do modelo;
+- versões só podem existir para apresentações do próprio usuário.
+
+VERSIONAMENTO
+A tabela de versões está preparada. Não foi criado snapshot automático a cada
+autosave porque isso geraria dezenas/centenas de versões desnecessárias.
+Na próxima fase podemos ligar versões a ações úteis como "Criar versão" ou a
+marcos importantes (antes de grandes alterações).
+
+COMO APLICAR
+1. Extraia o ZIP na raiz.
+2. Aceite substituir.
+
+3. Execute:
+
+git add src/pages/Templates.jsx src/services/data/supabaseEntityAdapter.js supabase/migrations/20260807213000_templates_versions_supabase.sql
+git commit -m "Migra modelos e versionamento para Supabase"
+git push origin main
+
+4. Aguarde GitHub Actions e Vercel verdes.
+
+DATA API
+Confirme exposição:
+- apresenta_mais.presentation_templates
+- apresenta_mais.template_blocks
+- apresenta_mais.presentation_versions
+
+Não exponha _migration_history.
+
+TESTE
+- abrir Modelos;
+- conferir os três modelos oficiais;
+- visualizar um modelo;
+- usar um modelo;
+- confirmar que abre uma nova apresentação com os blocos;
+- atualizar a página e conferir persistência.
+
+PRÓXIMA FASE
+Depois desta etapa ficam principalmente:
+- dicas/notificações;
+- administração;
+- planos/configurações futuras;
+- upload físico de arquivos;
+- remoção definitiva do SDK Base44 e dos /api/apps/undefined.

@@ -1,0 +1,25 @@
+CORREÇÃO V2 DO SCRIPT DE MIGRATIONS — APRESENTA MAIS
+
+O erro anterior continuava ocorrendo porque a interpolação `:'migration_version'`
+não estava sendo processada pelo psql no contexto usado pelo GitHub Actions.
+
+Nesta versão:
+- não existe mais `:migration_version`;
+- o nome da migration é escapado como literal SQL;
+- nenhuma credencial ou configuração do Supabase é alterada;
+- o histórico continua isolado em `apresenta_mais._migration_history`;
+- o workflow continua sem tocar no histórico global dos outros aplicativos.
+
+APLICAÇÃO
+---------
+Extraia este ZIP diretamente na raiz do projeto e substitua:
+
+scripts/apply-apresenta-migrations.sh
+
+Depois execute:
+
+git add scripts/apply-apresenta-migrations.sh
+git commit -m "Corrige interpolacao do historico de migrations"
+git push origin main
+
+Não altere os secrets e não execute `supabase migration repair`.

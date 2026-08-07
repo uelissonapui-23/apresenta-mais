@@ -1,0 +1,29 @@
+AJUSTE DO APRESENTA+ PARA PROJETO SUPABASE COMPARTILHADO
+
+1. Extraia este ZIP diretamente na raiz do projeto APRESENTA MAIS.
+2. Aceite substituir os arquivos.
+3. NÃO substitua nem envie o seu .env.local ao GitHub.
+4. No .env.local existente, mantenha a URL e a publishable key e acrescente:
+
+VITE_SUPABASE_SCHEMA=apresenta_mais
+
+5. Mantenha por enquanto:
+
+VITE_BACKEND_PROVIDER=base44
+
+6. Execute:
+
+npm install
+npm run check:migration-foundation
+npm run build
+
+7. Publique a correção:
+
+git add .env.example package.json package-lock.json src/lib scripts supabase
+git commit -m "Isola Apresenta Mais no projeto Supabase compartilhado"
+git push origin main
+
+IMPORTANTE
+A migration anterior usava public.profiles. Como o projeto Supabase já é compartilhado
+com outros aplicativos, isso poderia conflitar com tabelas existentes. A correção cria
+o schema exclusivo apresenta_mais e não altera public.profiles.

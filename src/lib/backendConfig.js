@@ -1,9 +1,7 @@
 const normalize = (value) => String(value || '').trim();
 
-const requestedProvider = normalize(import.meta.env.VITE_BACKEND_PROVIDER).toLowerCase();
-
 export const backendConfig = Object.freeze({
-  provider: requestedProvider === 'supabase' ? 'supabase' : 'base44',
+  provider: 'supabase',
   supabaseUrl: normalize(import.meta.env.VITE_SUPABASE_URL),
   supabasePublishableKey: normalize(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY),
   supabaseSchema: normalize(import.meta.env.VITE_SUPABASE_SCHEMA) || 'apresenta_mais',
@@ -15,16 +13,11 @@ export const backendConfig = Object.freeze({
 });
 
 export function isSupabaseConfigured() {
-  return Boolean(
-    backendConfig.supabaseUrl
-    && backendConfig.supabasePublishableKey,
-  );
+  return Boolean(backendConfig.supabaseUrl && backendConfig.supabasePublishableKey);
 }
 
 export function assertSupabaseConfigured() {
   if (!isSupabaseConfigured()) {
-    throw new Error(
-      'Supabase ainda não foi configurado. Preencha VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY.',
-    );
+    throw new Error('Supabase não configurado. Preencha VITE_SUPABASE_URL e VITE_SUPABASE_PUBLISHABLE_KEY.');
   }
 }

@@ -1,0 +1,73 @@
+APRESENTA+ — ETAPA 5: BIBLIOTECA, TAGS, ANEXOS E REFERÊNCIAS
+
+MIGRADO PARA O SUPABASE
+- LibraryItem -> apresenta_mais.library_items
+- Tag -> apresenta_mais.tags
+- PresentationTag -> apresenta_mais.presentation_tags
+- BlockAttachment -> apresenta_mais.block_attachments
+- BlockReference -> apresenta_mais.block_references
+
+POR QUE ESTA ETAPA
+Essas entidades são usadas diretamente pelo editor, lista de apresentações,
+biblioteca e modo de apresentação. Migrá-las agora reduz bastante as chamadas
+restantes ao Base44 sem tocar ainda na administração/monetização.
+
+SEGURANÇA
+- Biblioteca e tags: somente o próprio usuário.
+- PresentationTag: vínculo permitido apenas entre apresentação e tag do mesmo usuário.
+- Anexos/referências: acesso somente se o bloco pertencer a uma apresentação do usuário.
+- Nenhuma policy de outro schema/app é alterada.
+
+APLICAÇÃO
+Extraia o ZIP na raiz e aceite substituir.
+
+Depois execute:
+
+git add src/services/data/supabaseEntityAdapter.js supabase/migrations/20260807210000_library_tags_references_supabase.sql
+git commit -m "Migra biblioteca tags e referencias para Supabase"
+git push origin main
+
+Aguarde GitHub Actions e Vercel verdes.
+
+DATA API
+Confirme exposição destas 5 tabelas:
+- apresenta_mais.library_items
+- apresenta_mais.tags
+- apresenta_mais.presentation_tags
+- apresenta_mais.block_attachments
+- apresenta_mais.block_references
+
+Não exponha _migration_history.
+
+TESTES
+1. Biblioteca:
+   - criar item
+   - editar
+   - favoritar
+   - duplicar
+   - excluir
+   - atualizar a página e conferir persistência
+
+2. Tags:
+   - criar tag
+   - aplicar em uma apresentação
+   - remover
+   - excluir tag
+
+3. Editor:
+   - adicionar um anexo por URL
+   - adicionar uma referência
+   - atualizar a página
+   - verificar persistência
+   - excluir ambos
+
+4. Segurança:
+   - sair e entrar novamente
+   - confirmar que os itens continuam e pertencem somente à conta atual
+
+PRÓXIMA ETAPA
+- templates/modelos
+- histórico/versionamento
+- dicas/notificações
+- administração/planos
+- remoção final do Base44 e dos erros /api/apps/undefined

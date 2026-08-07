@@ -1,0 +1,60 @@
+APRESENTA+ — ETAPA 4: CRIAÇÃO GUIADA NO SUPABASE + FLUXO MAIS RÁPIDO
+
+MIGRAÇÃO
+- GuidedFlow -> apresenta_mais.guided_flows
+- GuidedQuestion -> apresenta_mais.guided_questions
+- GuidedAnswer -> apresenta_mais.guided_answers
+
+MELHORIA PARA INICIANTES
+Antes, "Criar com ajuda" levava o usuário por um formulário grande e depois por até 7 perguntas.
+Agora o caminho padrão fica:
+1. Escolher o tipo da apresentação.
+2. Informar apenas nome, público e duração.
+3. Responder 4 perguntas simples.
+4. O app gera automaticamente abertura, tópicos, exemplo/aplicação opcional e conclusão.
+5. O usuário cai no editor para ajustar o que quiser.
+
+O modo "Criar do zero" continua com todos os campos avançados. Nenhuma função avançada foi removida.
+
+IMPORTANTE
+Este pacote inclui uma versão consolidada de supabaseEntityAdapter.js com:
+- apresentações/blocos
+- preferências
+- sessões de ensaio/progresso
+- correção de UUIDs/datas vazias
+- GuidedFlow/GuidedQuestion/GuidedAnswer
+Portanto ele preserva as correções das etapas anteriores.
+
+COMO APLICAR
+Extraia este ZIP na raiz do projeto e aceite substituir os arquivos.
+
+Depois execute:
+
+git add src/pages/NewPresentation.jsx src/pages/GuidedCreation.jsx src/services/data/supabaseEntityAdapter.js supabase/migrations/20260807202000_guided_creation_supabase.sql
+git commit -m "Migra e simplifica criacao guiada"
+git push origin main
+
+Aguarde GitHub Actions e Vercel ficarem verdes.
+
+DATA API
+Confirme que ficaram expostas:
+- apresenta_mais.guided_flows
+- apresenta_mais.guided_questions
+- apresenta_mais.guided_answers
+
+Não exponha _migration_history.
+
+TESTE PRINCIPAL
+1. Home -> Criar com ajuda.
+2. Escolha um tipo.
+3. Confirme que aparecem só Nome, Público e Tempo.
+4. Clique Começar guia.
+5. Confirme que são apenas 4 perguntas.
+6. Responda tema, resultado e 2-5 pontos; a quarta é opcional.
+7. Gere a estrutura.
+8. Confirme no editor: Abertura + tópicos + exemplo (se usado) + Conclusão.
+9. Atualize a página e confirme persistência.
+
+OBSERVAÇÃO
+Se não houver fluxos administrativos cadastrados, o app usa o novo Guia rápido de 4 perguntas.
+Se futuramente você criar fluxos personalizados na administração, eles continuam funcionando normalmente.

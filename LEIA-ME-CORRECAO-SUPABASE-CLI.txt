@@ -1,0 +1,23 @@
+CORREÇÃO SUPABASE CLI — APRESENTA MAIS
+
+Problema corrigido:
+O GitHub Actions estava usando `version: latest` na Supabase CLI.
+A execução falhava em `supabase link` com `failed to get api keys: SchemaError(...)`.
+
+Alteração:
+A CLI foi fixada na versão estável 2.101.0.
+Também foi adicionada uma etapa que imprime a versão usada no log.
+
+Aplicação:
+Extraia este ZIP diretamente na raiz do projeto e aceite substituir:
+.github/workflows/deploy-supabase-production.yml
+
+Depois:
+git add .github/workflows/deploy-supabase-production.yml
+git commit -m "Fixa versao estavel da Supabase CLI"
+git push origin main
+
+Em seguida acompanhe:
+GitHub > Actions > Atualizar Supabase em produção
+
+Se a execução ainda falhar, envie a primeira mensagem vermelha da etapa que falhar.

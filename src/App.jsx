@@ -453,7 +453,7 @@ function AppRoutes() {
 
               <Route
                 path="/admin/plans"
-                element={<AdminPlans />}
+                element={backendConfig.features.paidPlans ? <AdminPlans /> : <Navigate to="/admin" replace />}
               />
 
               <Route
@@ -503,22 +503,22 @@ function AppRoutes() {
 
               <Route
                 path="/admin/plan-requests"
-                element={<AdminPlanRequests />}
+                element={backendConfig.features.paidPlans ? <AdminPlanRequests /> : <Navigate to="/admin" replace />}
               />
 
               <Route
                 path="/admin/support-contributions"
-                element={<AdminSupportContributions />}
+                element={backendConfig.features.supporterPlan ? <AdminSupportContributions /> : <Navigate to="/admin" replace />}
               />
 
               <Route
                 path="/admin/ads"
-                element={<AdminAds />}
+                element={backendConfig.features.ads ? <AdminAds /> : <Navigate to="/admin" replace />}
               />
 
               <Route
                 path="/admin/payment-config"
-                element={<AdminPaymentConfig />}
+                element={(backendConfig.features.paidPlans || backendConfig.features.supporterPlan) ? <AdminPaymentConfig /> : <Navigate to="/admin" replace />}
               />
             </Route>
           </Route>

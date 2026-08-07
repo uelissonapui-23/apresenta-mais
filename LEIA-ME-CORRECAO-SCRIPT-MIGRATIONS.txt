@@ -1,0 +1,21 @@
+CORREÇÃO DO SCRIPT DE MIGRATIONS — APRESENTA MAIS
+
+Problema:
+O script anterior passava a variável do psql de forma que a consulta resultava
+em erro de sintaxe próximo de ':'.
+
+Correção:
+- ajustado o uso de -v "migration_version=..."
+- mantida a referência SQL segura com :'migration_version'
+- nenhuma alteração em secrets, Supabase ou migrations
+
+Aplicação:
+Extraia este ZIP na raiz do projeto e substitua:
+scripts/apply-apresenta-migrations.sh
+
+Depois:
+git add scripts/apply-apresenta-migrations.sh
+git commit -m "Corrige script de migrations isoladas"
+git push origin main
+
+O GitHub Actions deve executar novamente.

@@ -1,0 +1,41 @@
+APRESENTA+ — ETAPA 8: LOGOUT ESTÁVEL + MONETIZAÇÃO FORA DO FLUXO
+
+CORREÇÕES
+- Corrige o erro visual "Falha ao carregar o painel" durante o logout.
+- Requisições em voo do Home não exibem toast depois que a tela desmonta.
+- 401/403 causados pelo encerramento normal da sessão não são tratados como falha do painel.
+- O logout usa o AuthContext/useCurrentUser para limpar também o cache do perfil.
+
+PLANOS ADIADOS
+- "Meu Plano" permanece fora do menu.
+- A rota /my-plan redireciona para Configurações enquanto os planos estiverem desativados.
+- Telas normais deixam de consultar Plan no Base44 quando VITE_FEATURE_PAID_PLANS=false.
+- Itens administrativos de planos, solicitações, apoios, anúncios e pagamentos ficam ocultos conforme as feature flags.
+- Nenhuma tabela de planos foi apagada; será possível reativar futuramente.
+
+MIGRAÇÃO
+- O nome legado PresentationStyle passa a usar a tabela já migrada apresenta_mais.communication_styles.
+  Isso elimina mais uma dependência administrativa do Base44 sem criar tabela duplicada.
+
+ARQUIVOS
+- src/App.jsx
+- src/components/layout/AppLayout.jsx
+- src/pages/Home.jsx
+- src/pages/Settings.jsx
+- src/pages/ThemesPage.jsx
+- src/pages/NewPresentation.jsx
+- src/services/data/supabaseEntityAdapter.js
+
+Não há migration SQL nesta etapa. Não precisa alterar o Data API.
+
+COMANDOS
+git add src/App.jsx src/components/layout/AppLayout.jsx src/pages/Home.jsx src/pages/Settings.jsx src/pages/ThemesPage.jsx src/pages/NewPresentation.jsx src/services/data/supabaseEntityAdapter.js
+git commit -m "Estabiliza logout e remove planos do fluxo atual"
+git push origin main
+
+TESTES
+1. Confirmar que "Meu Plano" não aparece no menu.
+2. Abrir /my-plan manualmente: deve ir para Configurações.
+3. Na Home, clicar Sair da conta: deve ir ao Login sem toast vermelho do painel.
+4. Entrar novamente e confirmar que Home carrega normal.
+5. Criar do zero e Criar com ajuda para garantir que o desligamento de Plan não afetou criação.

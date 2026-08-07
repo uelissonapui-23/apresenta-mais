@@ -1,0 +1,37 @@
+CORREÇÃO DO ONBOARDING — APRESENTA+
+
+Problema corrigido:
+O cadastro/login já estava no Supabase, porém a última etapa do onboarding ainda
+tentava gravar UserProfile e UserPreference diretamente no Base44. Com
+VITE_BACKEND_PROVIDER=supabase isso fazia a conclusão falhar.
+
+O que muda:
+- Perfil do onboarding é salvo por profileRepository (Supabase no modo atual).
+- Preferências passam a ser salvas em apresenta_mais.user_preferences.
+- Foi criada migration com RLS para cada usuário acessar apenas suas próprias preferências.
+- "Configurar depois" também deixa de depender do Base44 para salvar o perfil.
+- Editor e apresentações NÃO foram migrados nesta correção.
+
+COMO APLICAR
+1. Extraia este ZIP diretamente na raiz do projeto.
+2. Aceite substituir os arquivos.
+3. Execute:
+
+git add src/pages/Onboarding.jsx src/services/userPreferenceRepository.js supabase/migrations/20260807160000_user_preferences_onboarding.sql
+git commit -m "Corrige conclusao do onboarding no Supabase"
+git push origin main
+
+4. Aguarde:
+- GitHub Actions ficar verde (migration)
+- Vercel terminar o novo deploy
+
+5. No Supabase > Data API > Exposed tables:
+- confirme que apresenta_mais.user_preferences está exposta.
+Como "Automatically expose new tables" estava ativado, ela deve entrar automaticamente.
+
+6. Teste novamente a última etapa do onboarding.
+
+Observação:
+No ambiente de geração não foi possível rodar o build porque o executável Vite
+dentro do node_modules do ZIP veio com permissão incompatível com Linux. A alteração
+é pequena e deve ser validada no seu Windows/Vercel.

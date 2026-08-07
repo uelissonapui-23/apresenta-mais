@@ -8,11 +8,8 @@ import React, {
   useState,
 } from 'react';
 
-import { createAxiosClient } from '@base44/sdk/dist/utils/axios-client';
-
 import { authProvider } from '@/services/authProvider';
-import { appParams } from '@/lib/app-params';
-import { backendConfig } from '@/lib/backendConfig';
+import { getSupabaseClient } from '@/lib/supabaseClient';
 
 const AuthContext = createContext(null);
 
@@ -79,17 +76,6 @@ function normalizeAuthError(error, fallbackType = 'unknown') {
   };
 }
 
-function getPublicSettingsPayload(response) {
-  if (!response) {
-    return null;
-  }
-
-  if (response.data) {
-    return response.data;
-  }
-
-  return response;
-}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -232,57 +218,14 @@ export function AuthProvider({ children }) {
         }
 
         try {
-          if (backendConfig.provider === 'supabase') {
-            const currentUser = await checkUserAuth({ force });
-            const publicSettings = { auth_required: true, backend: 'supabase' };
-            if (mountedRef.current) setAppPublicSettings(publicSettings);
-            return { publicSettings, user: currentUser };
-          }
-
-          if (!appParams.appId) {
-            throw new Error(
-              'O identificador do aplicativo Base44 não foi configurado.',
-            );
-          }
-
-          const appClient = createAxiosClient({
-            baseURL: '/api/apps/public',
-
-            headers: {
-              'X-App-Id': appParams.appId,
-            },
-
-            token: appParams.token || undefined,
-            interceptResponses: true,
-          });
-
-          const response = await appClient.get(
-            `/prod/public-settings/by-id/${appParams.appId}`,
-          );
-
-          const publicSettings = getPublicSettingsPayload(
-            response,
-          );
+          const currentUser = await checkUserAuth({ force });
+          const publicSettings = { auth_required: true, backend: 'supabase' };
 
           if (mountedRef.current) {
             setAppPublicSettings(publicSettings);
           }
 
-          /*
-          | O token vindo pela URL é removido dela e salvo pelo
-          | app-params. Mesmo quando appParams.token estiver vazio,
-          | o SDK pode possuir uma sessão válida no armazenamento.
-          | Por isso tentamos consultar o usuário em todos os casos.
-          */
-
-          const currentUser = await checkUserAuth({
-            force,
-          });
-
-          return {
-            publicSettings,
-            user: currentUser,
-          };
+          return { publicSettings, user: currentUser };
         } catch (error) {
           console.error(
             'Falha ao verificar o estado público do aplicativo:',
@@ -349,6 +292,16 @@ export function AuthProvider({ children }) {
       mountedRef.current = false;
     };
   }, [checkAppState]);
+
+  useEffect(() => {
+    const { data } = getSupabaseClient().auth.onAuthStateChange(() => {
+      if (mountedRef.current) {
+        checkUserAuth({ force: true });
+      }
+    });
+
+    return () => data?.subscription?.unsubscribe?.();
+  }, [checkUserAuth]);
 
   /*
   |--------------------------------------------------------------------------

@@ -1,19 +1,11 @@
-import { backendConfig } from '@/lib/backendConfig';
-
-/**
- * Ponto único para decidir qual backend cada módulo utiliza.
- *
- * Nesta primeira etapa todo o aplicativo continua no Base44. Os serviços
- * migrados passarão a consultar este arquivo, um módulo de cada vez.
- */
 export function getBackendProvider() {
-  return backendConfig.provider;
+  return 'supabase';
 }
 
 export function usesBase44() {
-  return getBackendProvider() === 'base44';
+  return false;
 }
 
 export function usesSupabase() {
-  return getBackendProvider() === 'supabase';
+  return true;
 }

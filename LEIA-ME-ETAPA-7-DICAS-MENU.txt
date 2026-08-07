@@ -1,0 +1,18 @@
+APRESENTA+ — ETAPA 7
+
+Alterações:
+- remove temporariamente "Meu Plano" do menu do usuário;
+- mantém a rota/página existente para facilitar reativação futura;
+- migra AppTip para apresenta_mais.app_tips no Supabase;
+- AdminTips passa automaticamente a usar Supabase pelo proxy de entidades já existente;
+- RLS: usuários autenticados leem dicas ativas; administradores podem gerenciar todas.
+
+Depois de extrair na raiz:
+git add src/components/layout/AppLayout.jsx src/services/data/supabaseEntityAdapter.js supabase/migrations/20260807230000_app_tips_supabase.sql
+git commit -m "Migra dicas para Supabase e oculta Meu Plano"
+git push origin main
+
+Após GitHub Actions verde, no Supabase > Data API > Exposed tables, habilite:
+apresenta_mais.app_tips
+
+Não exponha apresenta_mais._migration_history.

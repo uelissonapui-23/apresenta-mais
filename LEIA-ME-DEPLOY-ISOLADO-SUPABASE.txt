@@ -1,0 +1,44 @@
+CORREÇÃO — DEPLOY ISOLADO DO APRESENTA MAIS NO SUPABASE COMPARTILHADO
+
+OBJETIVO
+-------
+Evitar o comando `supabase db push`, porque o mesmo projeto Supabase já possui
+histórico de migrations de outros aplicativos.
+
+O novo workflow:
+1. usa somente o secret SUPABASE_DB_URL;
+2. conecta diretamente ao PostgreSQL pelo Session Pooler;
+3. NÃO executa `supabase link`;
+4. NÃO executa `supabase db push`;
+5. NÃO altera `supabase_migrations.schema_migrations`;
+6. mantém um histórico exclusivo em:
+   apresenta_mais._migration_history
+7. aplica somente arquivos existentes em:
+   supabase/migrations/
+
+ARQUIVOS
+--------
+.github/workflows/deploy-supabase-production.yml
+scripts/apply-apresenta-migrations.sh
+
+COMO APLICAR
+------------
+Extraia este ZIP diretamente na raiz do projeto e aceite substituir os arquivos.
+
+Depois execute:
+
+git add .github/workflows/deploy-supabase-production.yml scripts/apply-apresenta-migrations.sh
+git commit -m "Isola deploy SQL do Apresenta Mais"
+git push origin main
+
+O push dispara o GitHub Actions automaticamente.
+
+IMPORTANTE
+----------
+- Não apague os secrets antigos. Eles podem ser úteis depois.
+- O workflow novo usa somente SUPABASE_DB_URL.
+- Não execute `supabase migration repair`.
+- Não execute `supabase db push` neste repositório enquanto ele compartilhar o
+  mesmo projeto Supabase com outros aplicativos.
+- Cada nova migration do Apresenta Mais deve ser um novo arquivo .sql com nome
+  crescente dentro de supabase/migrations.

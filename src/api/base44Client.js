@@ -1,73 +1,40 @@
-import { createClient } from '@base44/sdk';
+import { getSupabaseEntity, isMigratedEntity } from '@/services/data/supabaseEntityAdapter';
+import { uploadUserFile } from '@/services/storageRepository';
 
-import { appParams } from '@/lib/app-params';
-import { backendConfig } from '@/lib/backendConfig';
-import {
-  getSupabaseEntity,
-  isMigratedEntity,
-} from '@/services/data/supabaseEntityAdapter';
+const DISABLED_ENTITIES = new Set([
+  'Plan', 'PlanRequest', 'SupportContribution',
+  'PaymentConfiguration', 'AdConfiguration', 'AdPlacement',
+]);
 
-const GLOBAL_CLIENT_KEY = '__APRESENTA_BASE44_CLIENT__';
+const disabledEntity = Object.freeze({
+  async list() { return []; },
+  async filter() { return []; },
+  async get() { return null; },
+  async create() { throw new Error('Este recurso está desativado nesta versão do Apresenta+.'); },
+  async bulkCreate() { throw new Error('Este recurso está desativado nesta versão do Apresenta+.'); },
+  async update() { throw new Error('Este recurso está desativado nesta versão do Apresenta+.'); },
+  async delete() { throw new Error('Este recurso está desativado nesta versão do Apresenta+.'); },
+});
 
-function normalizeOptionalString(value) {
-  if (value === undefined || value === null) return undefined;
-  const normalizedValue = String(value).trim();
-  return normalizedValue || undefined;
-}
-
-const clientConfiguration = {
-  appId: normalizeOptionalString(appParams.appId),
-  token: normalizeOptionalString(appParams.token),
-  functionsVersion: normalizeOptionalString(appParams.functionsVersion),
-  appBaseUrl: normalizeOptionalString(appParams.appBaseUrl),
-  serverUrl: '',
-  requiresAuth: false,
-};
-
-let legacyClient = null;
-
-function getLegacyClient() {
-  if (legacyClient) return legacyClient;
-
-  if (
-    typeof globalThis !== 'undefined'
-    && globalThis[GLOBAL_CLIENT_KEY]
-  ) {
-    legacyClient = globalThis[GLOBAL_CLIENT_KEY];
-    return legacyClient;
-  }
-
-  legacyClient = createClient(clientConfiguration);
-
-  if (typeof globalThis !== 'undefined') {
-    globalThis[GLOBAL_CLIENT_KEY] = legacyClient;
-  }
-
-  return legacyClient;
-}
-
-const entitiesProxy = new Proxy({}, {
+const entities = new Proxy({}, {
   get(_target, entityName) {
-    if (
-      backendConfig.provider === 'supabase'
-      && typeof entityName === 'string'
-      && isMigratedEntity(entityName)
-    ) {
-      return getSupabaseEntity(entityName);
-    }
-
-    return getLegacyClient().entities[entityName];
+    if (typeof entityName !== 'string') return undefined;
+    if (isMigratedEntity(entityName)) return getSupabaseEntity(entityName);
+    if (DISABLED_ENTITIES.has(entityName)) return disabledEntity;
+    throw new Error(`Entidade ainda não disponível no backend Supabase: ${entityName}`);
   },
 });
 
-export const base44 = new Proxy({}, {
-  get(_target, property) {
-    if (property === 'entities') {
-      return entitiesProxy;
-    }
-
-    return getLegacyClient()[property];
-  },
+// Nome mantido temporariamente para evitar uma refatoração enorme das telas.
+// Não existe mais SDK, API, analytics ou backend Base44 por trás deste objeto.
+/** @type {any} */
+export const base44 = Object.freeze({
+  entities,
+  integrations: Object.freeze({
+    Core: Object.freeze({
+      UploadFile: async ({ file }) => uploadUserFile(file),
+    }),
+  }),
 });
 
 export default base44;

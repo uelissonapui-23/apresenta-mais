@@ -1,0 +1,74 @@
+APRESENTA+ — ETAPA FINAL DA MIGRAÇÃO PARA SUPABASE
+
+OBJETIVO
+Esta etapa remove o runtime Base44 do aplicativo. O nome `base44` continua apenas
+em src/api/base44Client.js como uma fachada de compatibilidade para evitar
+reescrever dezenas de páginas de uma vez; por trás dela só existe Supabase.
+
+O QUE FOI REMOVIDO
+- @base44/sdk
+- @base44/vite-plugin
+- analytics/navigation/visual-edit do plugin Base44
+- endpoint /api/apps/public da inicialização
+- fallback de autenticação Base44
+- fallback de perfil Base44
+- criação do cliente Base44
+
+RESULTADO
+- autenticação: Supabase Auth
+- perfis: apresenta_mais.profiles
+- apresentações/blocos: Supabase
+- criação guiada: Supabase
+- ensaios/sessões: Supabase
+- biblioteca/tags/anexos/referências: Supabase
+- modelos/versionamento: Supabase
+- dicas: Supabase
+- uploads futuros: Supabase Storage
+- planos/anúncios/apoio: DESATIVADOS, sem chamadas externas
+
+ADMINISTRAÇÃO
+Foi acrescentado suporte seguro para listar/editar perfis por administrador via RPC.
+As áreas administrativas de tipos, objetivos, estilos, blocos, modelos, fluxos,
+perguntas, temas e dicas usam as entidades já migradas.
+
+MONETIZAÇÃO
+As rotas de planos, solicitações, apoio, anúncios e pagamento redirecionam para o
+painel enquanto suas feature flags estiverem desligadas. Nenhuma função foi apagada;
+poderemos reativá-las posteriormente em cima do Supabase.
+
+UPLOAD
+Foi criado o bucket `apresenta-mais-files`, limitado a 5 MB e aos formatos JPG,
+PNG, WEBP e PDF. Cada usuário só pode gravar/alterar/excluir dentro da própria pasta.
+
+COMO APLICAR
+1. Extraia este ZIP diretamente na raiz do projeto e aceite substituir.
+2. Execute:
+
+npm install
+npm run build
+
+git add package.json package-lock.json vite.config.js src/api/base44Client.js src/lib/AuthContext.jsx src/lib/backendConfig.js src/services/authProvider.js src/services/profileRepository.js src/services/storageRepository.js src/services/data/supabaseEntityAdapter.js src/services/data/backendProvider.js src/services/userPreferenceRepository.js src/App.jsx supabase/migrations/20260807220000_finalize_supabase_only.sql
+
+git commit -m "Finaliza migracao do Apresenta Mais para Supabase"
+git push origin main
+
+3. Aguarde GitHub Actions e Vercel ficarem verdes.
+
+4. Data API: nenhuma tabela nova de negócio precisa ser exposta nesta etapa.
+Nenhuma função RPC nova precisa ser exposta nesta etapa.
+
+TESTE FINAL RECOMENDADO
+- cadastro/login/logout
+- perfil + atualizar página
+- criar do zero + editar + recarregar
+- criar com ajuda
+- modelo -> nova apresentação
+- ensaio -> pausar/continuar/finalizar
+- biblioteca/referência/tag
+- sair e entrar novamente
+- abrir Console: não deve mais existir /api/apps/undefined nem analytics Base44
+- se tiver perfil admin: abrir tipos, objetivos, estilos, blocos, modelos, temas e dicas
+
+IMPORTANTE
+`VITE_BACKEND_PROVIDER` pode continuar no Vercel sem causar problema, mas o app
+agora é Supabase-only. Em uma limpeza futura você pode remover essa variável.

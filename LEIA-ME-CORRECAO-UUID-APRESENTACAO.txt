@@ -1,0 +1,38 @@
+CORREÇÃO DA CRIAÇÃO DE APRESENTAÇÃO — APRESENTA+
+
+Causa confirmada:
+O formulário enviava string vazia ('') para campos UUID opcionais, especialmente
+theme_id quando "Usar tema padrão" estava selecionado. PostgreSQL rejeita '' em
+coluna UUID e retornava o erro 22P02.
+
+Correções:
+- presentation_type_id vazio -> null
+- objective_id vazio -> null
+- communication_style_id vazio -> null
+- theme_id vazio -> null
+- proteção adicional no adaptador para UUIDs opcionais de apresentações e blocos
+- erros do Supabase agora aparecem no Console com mensagem/código mais legíveis
+- mensagem antiga que citava Base44 foi neutralizada
+
+Arquivos alterados:
+src/pages/NewPresentation.jsx
+src/services/data/supabaseEntityAdapter.js
+
+Não há nova migration e não precisa alterar o Supabase/Data API.
+
+Como aplicar:
+1. Extraia este ZIP diretamente na raiz do projeto.
+2. Aceite substituir os arquivos.
+3. Execute:
+
+git add src/pages/NewPresentation.jsx src/services/data/supabaseEntityAdapter.js
+git commit -m "Corrige campos UUID na criacao de apresentacao"
+git push origin main
+
+4. Aguarde o Vercel concluir o deploy.
+5. Teste "Criar do zero" novamente, primeiro com "Usar tema padrão".
+
+Validação:
+O build não pôde ser executado neste ambiente porque o node_modules do ZIP veio
+do Windows e não contém o binário opcional Linux do Rollup. Não foi identificada
+necessidade de alteração de schema nesta correção.
