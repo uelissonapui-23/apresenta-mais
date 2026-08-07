@@ -22,6 +22,7 @@ const MIGRATED_TABLES = Object.freeze({
   PresentationTemplate: 'presentation_templates',
   TemplateBlock: 'template_blocks',
   PresentationVersion: 'presentation_versions',
+  AppTip: 'app_tips',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({

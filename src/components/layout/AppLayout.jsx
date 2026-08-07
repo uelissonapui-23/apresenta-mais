@@ -110,11 +110,6 @@ const SECONDARY_NAV_ITEMS = [
     icon: UserRound,
   },
   {
-    label: 'Meu Plano',
-    path: '/my-plan',
-    icon: CreditCard,
-  },
-  {
     label: 'Configurações',
     path: '/settings',
     icon: Settings,
