@@ -35,8 +35,9 @@ import {
   Wand2,
 } from 'lucide-react';
 
-import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
+import { saveUserProfile } from '@/services/profileRepository';
+import { getUserPreference, saveUserPreference } from '@/services/userPreferenceRepository';
 
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
@@ -535,15 +536,7 @@ export default function Onboarding() {
     setInitializing(true);
 
     try {
-      const preferences = await base44.entities.UserPreference.filter(
-        {
-          user_id: user.id,
-        },
-        '-updated_date',
-        1,
-      );
-
-      const preference = selectCurrentRecord(preferences);
+      const preference = await getUserPreference(user.id);
       const accessibility = parseAccessibility(
         preference?.accessibility_settings_json,
       );
@@ -732,19 +725,10 @@ export default function Onboarding() {
         active: true,
       };
 
-      let savedProfile;
-
-      if (profile?.id) {
-        savedProfile = await base44.entities.UserProfile.update(
-          profile.id,
-          profilePayload,
-        );
-      } else {
-        savedProfile = await base44.entities.UserProfile.create({
-          ...profilePayload,
-          role: 'user',
-        });
-      }
+      const savedProfile = await saveUserProfile(
+        user.id,
+        profilePayload,
+      );
 
       if (!savedProfile?.id) {
         throw new Error(
@@ -824,19 +808,10 @@ export default function Onboarding() {
         active: true,
       };
 
-      let savedProfile = null;
-
-      if (profile?.id) {
-        savedProfile = await base44.entities.UserProfile.update(
-          profile.id,
-          profilePayload,
-        );
-      } else {
-        savedProfile = await base44.entities.UserProfile.create({
-          ...profilePayload,
-          role: 'user',
-        });
-      }
+      const savedProfile = await saveUserProfile(
+        user.id,
+        profilePayload,
+      );
 
       if (!savedProfile?.id) {
         throw new Error(
@@ -844,19 +819,7 @@ export default function Onboarding() {
         );
       }
 
-      const currentPreferences = uniqueById(
-        await base44.entities.UserPreference.filter(
-          {
-            user_id: user.id,
-          },
-          '-updated_date',
-          20,
-        ),
-      );
-
-      const currentPreference = selectCurrentRecord(
-        currentPreferences,
-      );
+      const currentPreference = await getUserPreference(user.id);
 
       const previousAccessibility = parseAccessibility(
         currentPreference?.accessibility_settings_json,
@@ -897,18 +860,13 @@ export default function Onboarding() {
         || null
       );
 
-      let savedPreference;
-
-      if (targetPreferenceId) {
-        savedPreference = await base44.entities.UserPreference.update(
-          targetPreferenceId,
-          preferencePayload,
-        );
-      } else {
-        savedPreference = await base44.entities.UserPreference.create(
-          preferencePayload,
-        );
-      }
+      const savedPreference = await saveUserPreference(
+        user.id,
+        {
+          ...preferencePayload,
+          id: targetPreferenceId,
+        },
+      );
 
       if (!savedPreference?.id) {
         throw new Error(
