@@ -211,3 +211,43 @@ textarea {
     max-width: calc(100vw - 1rem) !important;
   }
 }
+
+
+/* -------------------------------------------------------------------------
+   Acabamento responsivo final — celular, tablet e desktop
+   ------------------------------------------------------------------------- */
+
+@media (min-width: 1440px) {
+  .responsive-page {
+    max-width: 88rem;
+  }
+}
+
+@media (max-width: 639px) {
+  /* Evita que o último conteúdo fique escondido atrás da navegação fixa. */
+  main {
+    scroll-padding-bottom: 7rem;
+  }
+
+  /* Cards e títulos mantêm leitura confortável em aparelhos estreitos. */
+  .home-stat-grid > * {
+    min-height: 7rem;
+  }
+}
+
+@media (max-width: 359px) {
+  .home-stat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [role="dialog"] {
+    max-width: calc(100vw - 0.75rem) !important;
+  }
+}
+
+/* Paleta principal: preto, vermelho e neutros. Cores de estado continuam
+   semânticas (verde, azul, âmbar) para preservar compreensão e acessibilidade. */
+.brand-surface {
+  border-color: hsl(var(--primary) / 0.18);
+  background: hsl(var(--primary) / 0.045);
+}

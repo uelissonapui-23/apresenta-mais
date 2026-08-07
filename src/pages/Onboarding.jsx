@@ -234,7 +234,7 @@ const FINISH_OPTIONS = [
       'Escolha uma estrutura pronta e adapte ao seu conteúdo.',
     icon: LayoutList,
     className:
-      'bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300',
+      'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300',
   },
   {
     id: 'dashboard',
@@ -994,7 +994,7 @@ export default function Onboarding() {
                   </div>
 
                   <div className="rounded-2xl border bg-background p-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300">
                       <Settings2 className="h-5 w-5" />
                     </div>
 

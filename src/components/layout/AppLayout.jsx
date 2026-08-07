@@ -404,12 +404,12 @@ function Sidebar({
       className={[
         'fixed inset-y-0 left-0 z-40 hidden border-r bg-background lg:flex lg:flex-col',
         'transition-[width] duration-200',
-        collapsed ? 'w-[76px]' : 'w-64',
+        collapsed ? 'w-[76px]' : 'w-[272px]',
       ].join(' ')}
     >
       <div
         className={[
-          'flex h-16 items-center border-b px-3',
+          'flex h-[68px] items-center border-b px-3',
           collapsed
             ? 'justify-center'
             : 'justify-between',
@@ -422,8 +422,8 @@ function Sidebar({
         >
           <BrandLogo
             compact={collapsed}
-            markClassName={collapsed ? 'h-11 w-11' : 'h-10 w-10'}
-            nameClassName="text-base"
+            markClassName={collapsed ? 'h-11 w-11' : 'h-11 w-11'}
+            nameClassName="text-lg"
           />
         </Link>
 
@@ -838,7 +838,7 @@ function MobileBottomNavigation({
 
   return (
     <nav
-      className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-40 min-h-[4.75rem] border-t bg-background/95 px-2 pb-[max(0.65rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur lg:hidden"
       aria-label="Navegação principal"
     >
       <div className="mx-auto grid max-w-lg grid-cols-5 items-end">
@@ -1021,10 +1021,10 @@ export default function AppLayout() {
       <main
         className={[
           'min-h-screen min-w-0 transition-[padding] duration-200',
-          'pb-24 lg:pb-0',
+          'pb-28 lg:pb-0',
           sidebarCollapsed
             ? 'lg:pl-[76px]'
-            : 'lg:pl-64',
+            : 'lg:pl-[272px]',
         ].join(' ')}
       >
         <div className="min-w-0">

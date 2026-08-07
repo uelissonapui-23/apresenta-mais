@@ -77,7 +77,7 @@ const STATUS_CLASSES = {
     'border-blue-200 bg-blue-100 text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300',
 
   completed:
-    'border-violet-200 bg-violet-100 text-violet-700 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300',
+    'border-emerald-200 bg-emerald-100 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300',
 
   archived:
     'border-border bg-muted text-muted-foreground',
@@ -336,8 +336,8 @@ function StatCard({
   description,
 }) {
   return (
-    <Card className="border-border/70">
-      <CardContent className="p-4">
+    <Card className="h-full border-border/70">
+      <CardContent className="h-full p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -349,7 +349,7 @@ function StatCard({
             </p>
 
             {description && (
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="mt-1 text-xs leading-snug text-muted-foreground">
                 {description}
               </p>
             )}
@@ -381,7 +381,7 @@ function ContinueSessionCard({
   );
 
   return (
-    <Card className="overflow-hidden border-primary/25 bg-gradient-to-br from-primary/10 via-background to-background">
+    <Card className="overflow-hidden border-primary/25 bg-primary/5">
       <CardContent className="p-5 sm:p-6">
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0 flex-1">
@@ -1149,7 +1149,7 @@ export default function Home() {
   ).length;
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-7 overflow-x-hidden px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
+    <div className="mx-auto w-full max-w-7xl space-y-7 overflow-x-hidden px-4 pb-10 pt-5 sm:px-6 sm:pb-12 sm:pt-7 lg:px-8 lg:pb-10">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="text-sm font-medium text-primary">
@@ -1278,7 +1278,7 @@ export default function Home() {
             icon={Wand2}
             title="Criar com ajuda"
             description="Responda perguntas e receba uma estrutura guiada para seu objetivo."
-            accentClass="bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300"
+            accentClass="bg-red-100 text-red-700 dark:bg-red-950/50 dark:text-red-300"
           />
 
           <QuickAction
@@ -1293,7 +1293,7 @@ export default function Home() {
 
       <section
         aria-label="Resumo do usuário"
-        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+        className="home-stat-grid grid grid-cols-2 gap-3 lg:grid-cols-4"
       >
         <StatCard
           icon={PresentationIcon}
