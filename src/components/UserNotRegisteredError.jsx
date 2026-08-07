@@ -17,7 +17,7 @@ import {
   useNavigate,
 } from 'react-router-dom';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -59,7 +59,7 @@ export default function UserNotRegisteredError({
     setActionError('');
 
     try {
-      await base44.auth.logout(
+      await authProvider.logout(
         `${window.location.origin}/login`,
       );
     } catch (error) {

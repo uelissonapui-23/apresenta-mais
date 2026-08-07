@@ -10,8 +10,9 @@ import React, {
 
 import { createAxiosClient } from '@base44/sdk/dist/utils/axios-client';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 import { appParams } from '@/lib/app-params';
+import { backendConfig } from '@/lib/backendConfig';
 
 const AuthContext = createContext(null);
 
@@ -132,7 +133,7 @@ export function AuthProvider({ children }) {
   | Verificação do usuário autenticado
   |--------------------------------------------------------------------------
   |
-  | Esta é a única função do contexto que consulta base44.auth.me().
+  | Esta é a única função do contexto que consulta authProvider.me().
   | O hook useCurrentUser reutiliza o usuário daqui e consulta somente
   | o UserProfile.
   |
@@ -156,7 +157,7 @@ export function AuthProvider({ children }) {
         }
 
         try {
-          const currentUser = await base44.auth.me();
+          const currentUser = await authProvider.me();
 
           if (!mountedRef.current) {
             return currentUser;
@@ -231,6 +232,13 @@ export function AuthProvider({ children }) {
         }
 
         try {
+          if (backendConfig.provider === 'supabase') {
+            const currentUser = await checkUserAuth({ force });
+            const publicSettings = { auth_required: true, backend: 'supabase' };
+            if (mountedRef.current) setAppPublicSettings(publicSettings);
+            return { publicSettings, user: currentUser };
+          }
+
           if (!appParams.appId) {
             throw new Error(
               'O identificador do aplicativo Base44 não foi configurado.',
@@ -374,9 +382,9 @@ export function AuthProvider({ children }) {
             || `${window.location.origin}/login`
           );
 
-          await base44.auth.logout(destination);
+          await authProvider.logout(destination);
         } else {
-          await base44.auth.logout();
+          await authProvider.logout();
         }
       } catch (error) {
         console.error(
@@ -417,7 +425,7 @@ export function AuthProvider({ children }) {
         || window.location.href
       );
 
-      return base44.auth.redirectToLogin(destination);
+      return authProvider.redirectToLogin(destination);
     },
     [],
   );

@@ -4,7 +4,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 
-import { base44 } from '@/api/base44Client';
+import { getUserProfile } from '@/services/profileRepository';
 import { useAuth } from '@/lib/AuthContext';
 
 const PROFILE_QUERY_KEY = 'current-user-profile';
@@ -155,14 +155,7 @@ export default function useCurrentUser() {
         return null;
       }
 
-      const rows = await base44.entities.UserProfile.filter({
-        user_id: user.id,
-      });
-
-      return selectCanonicalProfile(
-        rows,
-        user.id,
-      );
+      return getUserProfile(user.id);
     },
 
     enabled: Boolean(
@@ -310,14 +303,7 @@ export default function useCurrentUser() {
       return null;
     }
 
-    const rows = await base44.entities.UserProfile.filter({
-      user_id: refreshedUser.id,
-    });
-
-    const nextProfile = selectCanonicalProfile(
-      rows,
-      refreshedUser.id,
-    );
+    const nextProfile = await getUserProfile(refreshedUser.id);
 
     queryClient.setQueryData(
       [

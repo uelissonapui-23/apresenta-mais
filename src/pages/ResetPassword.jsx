@@ -13,7 +13,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider, isSupabaseAuthActive } from '@/services/authProvider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -143,7 +143,11 @@ export default function ResetPassword() {
   const location = useLocation();
 
   const resetToken = useMemo(
-    () => getResetToken(location.search),
+    () => (
+      isSupabaseAuthActive()
+        ? 'supabase-recovery-session'
+        : getResetToken(location.search)
+    ),
     [location.search],
   );
 
@@ -173,7 +177,7 @@ export default function ResetPassword() {
 
     const checkSession = async () => {
       try {
-        const currentUser = await base44.auth.me();
+        const currentUser = await authProvider.me();
 
         if (active && currentUser?.id && !resetToken) {
           navigate('/', { replace: true });
@@ -225,7 +229,7 @@ export default function ResetPassword() {
     setRequestError('');
 
     try {
-      await base44.auth.resetPassword({
+      await authProvider.resetPassword({
         resetToken,
         newPassword,
       });

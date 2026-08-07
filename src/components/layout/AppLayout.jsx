@@ -43,7 +43,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 import useCurrentUser from '@/hooks/useCurrentUser';
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -979,7 +979,7 @@ export default function AppLayout() {
     setLoggingOut(true);
 
     try {
-      await base44.auth.logout();
+      await authProvider.logout();
 
       navigate('/login', {
         replace: true,

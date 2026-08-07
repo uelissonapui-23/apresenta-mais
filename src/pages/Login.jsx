@@ -26,7 +26,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 import GoogleIcon from '@/components/GoogleIcon';
 import useCurrentUser from '@/hooks/useCurrentUser';
 
@@ -270,7 +270,7 @@ async function resolvePostLoginRoute({
   preferredRoute,
 } = {}) {
   try {
-    const currentUser = await base44.auth.me();
+    const currentUser = await authProvider.me();
 
     if (!currentUser?.id) {
       return '/';
@@ -636,7 +636,7 @@ export default function Login() {
     setLoading(true);
 
     try {
-      await base44.auth.loginViaEmailPassword(
+      await authProvider.loginViaEmailPassword(
         normalizedEmail,
         password,
       );
@@ -737,7 +737,7 @@ export default function Login() {
         `${window.location.origin}/login`
       );
 
-      const result = base44.auth.loginWithProvider(
+      const result = authProvider.loginWithProvider(
         'google',
         callbackUrl,
       );

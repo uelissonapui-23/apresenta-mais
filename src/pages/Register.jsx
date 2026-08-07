@@ -28,7 +28,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 import AuthLayout from '@/components/AuthLayout';
 import GoogleIcon from '@/components/GoogleIcon';
 import useCurrentUser from '@/hooks/useCurrentUser';
@@ -900,7 +900,7 @@ export default function Register() {
     setSubmitting(true);
 
     try {
-      const result = await base44.auth.register({
+      const result = await authProvider.register({
         email: normalizedEmail,
         password: form.password,
       });
@@ -924,7 +924,7 @@ export default function Register() {
 
       if (!verificationRequired) {
         try {
-          await base44.auth.loginViaEmailPassword(
+          await authProvider.loginViaEmailPassword(
             normalizedEmail,
             form.password,
           );
@@ -1000,7 +1000,7 @@ export default function Register() {
     setVerifying(true);
 
     try {
-      await base44.auth.verifyOtp({
+      await authProvider.verifyOtp({
         email: normalizedEmail,
         otp: otpCode,
         code: otpCode,
@@ -1012,7 +1012,7 @@ export default function Register() {
       |--------------------------------------------------------------------------
       */
 
-      await base44.auth.loginViaEmailPassword(
+      await authProvider.loginViaEmailPassword(
         normalizedEmail,
         form.password,
       );
@@ -1060,7 +1060,7 @@ export default function Register() {
     setResending(true);
 
     try {
-      await base44.auth.resendOtp({
+      await authProvider.resendOtp({
         email: normalizedEmail,
       });
 
@@ -1129,7 +1129,7 @@ export default function Register() {
         `${window.location.origin}/login`
       );
 
-      const result = base44.auth.loginWithProvider(
+      const result = authProvider.loginWithProvider(
         'google',
         callbackUrl,
       );

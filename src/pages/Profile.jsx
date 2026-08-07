@@ -25,8 +25,10 @@ import {
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import { saveUserProfile } from '@/services/profileRepository';
 import useCurrentUser from '@/hooks/useCurrentUser';
 import { clearQueryCache } from '@/lib/query-client';
+import { backendConfig } from '@/lib/backendConfig';
 
 import { useToast } from '@/components/ui/use-toast';
 import {
@@ -390,6 +392,12 @@ export default function Profile() {
         setForm(currentForm);
         setOriginalForm(currentForm);
 
+        if (backendConfig.provider === 'supabase') {
+          setStats({ presentations: 0, sessions: 0, completedSessions: 0 });
+          setPlan(null);
+          return;
+        }
+
         const [
           presentationRows,
           sessionRows,
@@ -596,22 +604,10 @@ export default function Profile() {
     setSaving(true);
 
     try {
-      let savedProfile = null;
-
-      if (profile?.id) {
-        savedProfile = await base44.entities.UserProfile.update(
-          profile.id,
-          payload,
-        );
-      } else {
-        savedProfile = await base44.entities.UserProfile.create({
-          user_id: user.id,
-          ...payload,
-          role: user?.role === 'admin' ? 'admin' : 'user',
-          onboarding_completed: true,
-          active: true,
-        });
-      }
+      const savedProfile = await saveUserProfile(user.id, {
+        ...payload,
+        onboarding_completed: true,
+      });
 
       if (!savedProfile?.id) {
         throw new Error(

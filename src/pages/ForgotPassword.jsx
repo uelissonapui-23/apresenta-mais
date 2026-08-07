@@ -10,7 +10,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -85,7 +85,7 @@ export default function ForgotPassword() {
 
     const checkSession = async () => {
       try {
-        const currentUser = await base44.auth.me();
+        const currentUser = await authProvider.me();
 
         if (active && currentUser?.id) {
           navigate('/', { replace: true });
@@ -141,7 +141,7 @@ export default function ForgotPassword() {
     setRequestError('');
 
     try {
-      await base44.auth.resetPasswordRequest(targetEmail);
+      await authProvider.resetPasswordRequest(targetEmail);
 
       setSentEmail(targetEmail);
       setSent(true);

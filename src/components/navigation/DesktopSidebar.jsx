@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Presentation, Plus, LayoutTemplate, BookOpen, Settings, Shield, PanelLeftClose, PanelLeft, LogOut, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { base44 } from '@/api/base44Client';
+import { authProvider } from '@/services/authProvider';
 
 const navItems = [
   { path: '/', icon: Home, label: 'Início' },
@@ -55,7 +55,7 @@ export default function DesktopSidebar({ isAdmin, userName }) {
           {!collapsed && <span className="text-sm text-sidebar-foreground truncate">{userName || 'Perfil'}</span>}
         </Link>
         <Button variant="ghost" size={collapsed ? "icon" : "default"} className={`w-full mt-1 text-sidebar-foreground hover:text-destructive ${collapsed ? '' : 'justify-start gap-3'}`}
-          onClick={() => base44.auth.logout('/')}>
+          onClick={() => authProvider.logout('/')}>
           <LogOut className="w-5 h-5 shrink-0" />
           {!collapsed && <span className="text-sm">Sair</span>}
         </Button>
