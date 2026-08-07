@@ -39,12 +39,13 @@ unset IFS
 for migration in "${migration_files[@]}"; do
   version="$(basename "$migration")"
 
+  # Passa o nome da migration como literal SQL seguro via psql.
   already_applied="$(
     psql "$SUPABASE_DB_URL" \
       -v ON_ERROR_STOP=1 \
       -X \
       -tA \
-      -v migration_version="$version" \
+      -v "migration_version=$version" \
       -c "select exists (
             select 1
             from apresenta_mais._migration_history
@@ -59,9 +60,6 @@ for migration in "${migration_files[@]}"; do
 
   echo "→ Aplicando $version..."
 
-  # Cada migration do projeto deve ser idempotente ou usar sua própria
-  # transação (BEGIN/COMMIT). O histórico só é gravado depois do SQL terminar
-  # com sucesso.
   psql "$SUPABASE_DB_URL" \
     -v ON_ERROR_STOP=1 \
     -X \
@@ -70,7 +68,7 @@ for migration in "${migration_files[@]}"; do
   psql "$SUPABASE_DB_URL" \
     -v ON_ERROR_STOP=1 \
     -X \
-    -v migration_version="$version" \
+    -v "migration_version=$version" \
     -c "insert into apresenta_mais._migration_history(version)
         values (:'migration_version')
         on conflict (version) do nothing;"
