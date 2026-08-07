@@ -14,6 +14,11 @@ const MIGRATED_TABLES = Object.freeze({
   GuidedFlow: 'guided_flows',
   GuidedQuestion: 'guided_questions',
   GuidedAnswer: 'guided_answers',
+  LibraryItem: 'library_items',
+  Tag: 'tags',
+  PresentationTag: 'presentation_tags',
+  BlockAttachment: 'block_attachments',
+  BlockReference: 'block_references',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({
