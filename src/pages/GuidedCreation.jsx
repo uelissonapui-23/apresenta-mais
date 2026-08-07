@@ -48,71 +48,45 @@ const FALLBACK_STORAGE_PREFIX = 'apresenta-guided-draft:';
 const FALLBACK_QUESTIONS = [
   {
     id: 'fallback-theme',
-    question_text: 'Qual é o tema principal?',
-    help_text: 'Escreva o assunto central da apresentação em uma frase clara.',
+    question_text: 'Sobre o que você vai falar?',
+    help_text: 'Escreva o assunto principal em poucas palavras. Não precisa pensar em um título perfeito agora.',
     field_type: 'text',
     required: true,
     order_index: 1,
     destination_field: 'main_theme',
+    placeholder: 'Ex.: Como manter a fé em tempos difíceis',
   },
   {
     id: 'fallback-message',
-    question_text: 'Qual mensagem o público deve guardar?',
-    help_text: 'Defina a ideia mais importante que deve permanecer depois da apresentação.',
+    question_text: 'O que você quer que as pessoas entendam ou façam no final?',
+    help_text: 'Uma frase simples já é suficiente. Essa será a direção da apresentação.',
     field_type: 'textarea',
     required: true,
     order_index: 2,
     destination_field: 'main_message',
-  },
-  {
-    id: 'fallback-introduction',
-    question_text: 'Como você pretende começar?',
-    help_text: 'Pode ser uma pergunta, história, dado, situação ou explicação curta.',
-    field_type: 'textarea',
-    required: false,
-    order_index: 3,
-    block_type_to_generate: 'section',
-    generated_title: 'Introdução',
+    placeholder: 'Ex.: Quero que entendam que perseverar é uma decisão diária.',
   },
   {
     id: 'fallback-points',
-    question_text: 'Quais são os pontos principais?',
-    help_text: 'Escreva um ponto por linha. Você poderá mudar a ordem no editor.',
+    question_text: 'Quais ideias você quer abordar?',
+    help_text: 'Escreva de 2 a 5 pontos, um por linha. Depois você poderá editar, mover ou acrescentar outros.',
     field_type: 'textarea',
     required: true,
-    order_index: 4,
+    order_index: 3,
     block_type_to_generate: 'topic',
     split_lines: true,
+    placeholder: 'Ex.:\nPor que perseverar\nO que nos faz desistir\nComo continuar na prática',
   },
   {
-    id: 'fallback-examples',
-    question_text: 'Existe alguma história, exemplo ou ilustração importante?',
-    help_text: 'Esta parte é opcional e poderá ser reposicionada no editor.',
+    id: 'fallback-example',
+    question_text: 'Tem algum exemplo, história ou aplicação que não pode faltar?',
+    help_text: 'Opcional. Se não tiver agora, pode pular e acrescentar depois no editor.',
     field_type: 'textarea',
     required: false,
-    order_index: 5,
+    order_index: 4,
     block_type_to_generate: 'example',
-    generated_title: 'Exemplo ou ilustração',
-  },
-  {
-    id: 'fallback-application',
-    question_text: 'Qual aplicação prática você deseja propor?',
-    help_text: 'O que o público poderá pensar, decidir ou fazer depois?',
-    field_type: 'textarea',
-    required: false,
-    order_index: 6,
-    block_type_to_generate: 'application',
-    generated_title: 'Aplicação',
-  },
-  {
-    id: 'fallback-conclusion',
-    question_text: 'Como você deseja concluir?',
-    help_text: 'Resuma a mensagem e defina a forma de encerramento.',
-    field_type: 'textarea',
-    required: false,
-    order_index: 7,
-    block_type_to_generate: 'conclusion',
-    generated_title: 'Conclusão',
+    generated_title: 'Exemplo ou aplicação',
+    placeholder: 'Conte aqui uma história, exemplo ou aplicação prática...',
   },
 ];
 
@@ -782,8 +756,52 @@ export default function GuidedCreation() {
     });
 
     const defaultType = typeByCode.topic || typeByCode.topico || typeByCode.section || blockTypes[0];
+    const openingType = typeByCode.opening || typeByCode.abertura || defaultType;
+    const conclusionType = typeByCode.conclusion || typeByCode.conclusao || defaultType;
     const blocks = [];
     let orderIndex = 0;
+
+    const mainTheme = String(
+      answers['fallback-theme'] || presentation?.main_theme || presentation?.title || '',
+    ).trim();
+    const mainMessage = String(
+      answers['fallback-message'] || presentation?.main_message || '',
+    ).trim();
+    const usingEssentialFallback = questions.some(
+      (question) => question.id === 'fallback-theme',
+    );
+
+    if (usingEssentialFallback && openingType?.id) {
+      const audience = String(presentation?.audience || '').trim();
+      const openingContent = [
+        mainTheme ? `Apresente o tema: ${mainTheme}.` : '',
+        audience ? `Conecte o início com o público: ${audience}.` : '',
+        'Comece com uma pergunta, situação, frase ou exemplo que desperte atenção.',
+      ].filter(Boolean).join(' ');
+
+      blocks.push({
+        presentation_id: id,
+        parent_id: null,
+        block_type_id: openingType.id,
+        title: 'Abertura',
+        summary: mainTheme,
+        content: openingContent,
+        additional_content: '',
+        presenter_notes: '',
+        order_index: orderIndex,
+        depth_level: 0,
+        importance_level: 5,
+        estimated_duration_seconds: 120,
+        is_essential: true,
+        is_hidden: false,
+        is_collapsed: false,
+        show_to_audience: true,
+        icon: '',
+        background_style: '',
+        text_style: '',
+      });
+      orderIndex += 1;
+    }
 
     visibleQuestions.forEach((question) => {
       const rawValue = answers[question.id];
@@ -837,6 +855,31 @@ export default function GuidedCreation() {
         orderIndex += 1;
       });
     });
+
+    if (usingEssentialFallback && conclusionType?.id && mainMessage) {
+      blocks.push({
+        presentation_id: id,
+        parent_id: null,
+        block_type_id: conclusionType.id,
+        title: 'Conclusão',
+        summary: mainMessage,
+        content: mainMessage,
+        additional_content: '',
+        presenter_notes: 'Retome a mensagem principal e encerre com uma frase ou ação clara.',
+        order_index: orderIndex,
+        depth_level: 0,
+        importance_level: 5,
+        estimated_duration_seconds: 120,
+        is_essential: true,
+        is_hidden: false,
+        is_collapsed: false,
+        show_to_audience: true,
+        icon: '',
+        background_style: '',
+        text_style: '',
+      });
+      orderIndex += 1;
+    }
 
     if (blocks.length === 0 && defaultType?.id) {
       blocks.push({
@@ -1085,7 +1128,7 @@ export default function GuidedCreation() {
           </div>
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-wide text-primary">
-              {flow?.name || 'Guia essencial'}
+              {flow?.name || 'Guia rápido'}
             </p>
             <h1 className="truncate text-lg font-bold sm:text-xl">
               {presentation?.title || 'Nova apresentação'}
@@ -1098,7 +1141,7 @@ export default function GuidedCreation() {
             <Sparkles className="h-4 w-4" />
             <AlertTitle>Guia padrão em uso</AlertTitle>
             <AlertDescription>
-              Ainda não há um fluxo administrativo específico para esta combinação. Suas respostas continuam sendo salvas e gerarão uma estrutura completa.
+              Este é o guia rápido do Apresenta+: quatro perguntas essenciais para montar uma primeira estrutura. Depois você pode ajustar tudo no editor.
             </AlertDescription>
           </Alert>
         )}

@@ -11,6 +11,9 @@ const MIGRATED_TABLES = Object.freeze({
   UserPreference: 'user_preferences',
   PresentationSession: 'presentation_sessions',
   SessionBlockProgress: 'session_block_progress',
+  GuidedFlow: 'guided_flows',
+  GuidedQuestion: 'guided_questions',
+  GuidedAnswer: 'guided_answers',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({
@@ -55,6 +58,11 @@ const NULLABLE_UUID_FIELDS = Object.freeze({
   ]),
   presentation_sessions: new Set([
     'current_block_id',
+  ]),
+  guided_flows: new Set([
+    'presentation_type_id',
+    'objective_id',
+    'communication_style_id',
   ]),
 });
 

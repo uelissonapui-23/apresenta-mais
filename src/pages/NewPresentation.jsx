@@ -803,6 +803,107 @@ export default function NewPresentation() {
 
   const isGuided = creationMode === 'guided';
 
+  if (isGuided) {
+    return (
+      <div className="mx-auto w-full max-w-2xl space-y-6 overflow-x-hidden px-4 py-5 sm:px-6 sm:py-8">
+        <StepHeader
+          title="Vamos começar pelo essencial"
+          description="Só precisamos de um nome, do público e do tempo. Depois o guia fará quatro perguntas simples e montará a estrutura para você."
+          badge={selectedType?.name || 'Criação guiada'}
+          onBack={() => setStep('type-select')}
+        />
+
+        {validationError && (
+          <Alert variant="destructive">
+            <AlertTitle>Revise os dados</AlertTitle>
+            <AlertDescription>{validationError}</AlertDescription>
+          </Alert>
+        )}
+
+        <Card>
+          <CardContent className="space-y-6 p-5 sm:p-7">
+            <div className="space-y-2">
+              <Label htmlFor="guided-title">Nome da apresentação *</Label>
+              <Input
+                id="guided-title"
+                value={form.title}
+                onChange={(event) => updateForm('title', event.target.value)}
+                placeholder="Ex.: A fé que permanece"
+                maxLength={160}
+                autoFocus
+              />
+              <p className="text-xs text-muted-foreground">
+                Pode ser provisório. Você poderá mudar depois.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="guided-audience">Para quem você vai apresentar?</Label>
+              <div className="relative">
+                <Users className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="guided-audience"
+                  value={form.audience}
+                  onChange={(event) => updateForm('audience', event.target.value)}
+                  placeholder="Ex.: Jovens, alunos, clientes, igreja..."
+                  className="pl-9"
+                  maxLength={200}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="guided-duration">Quanto tempo você terá?</Label>
+              <div className="relative">
+                <Clock3 className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="guided-duration"
+                  type="number"
+                  min="1"
+                  max="1440"
+                  inputMode="numeric"
+                  value={form.estimated_duration_minutes}
+                  onChange={(event) => updateForm('estimated_duration_minutes', event.target.value)}
+                  className="pl-9 pr-16"
+                />
+                <span className="pointer-events-none absolute right-3 top-2.5 text-sm text-muted-foreground">
+                  minutos
+                </span>
+              </div>
+            </div>
+
+            <Alert className="border-primary/20 bg-primary/5">
+              <Sparkles className="h-4 w-4" />
+              <AlertTitle>O guia cuida do restante</AlertTitle>
+              <AlertDescription>
+                Na próxima tela você responderá apenas quatro perguntas. Abertura e conclusão serão preparadas automaticamente.
+              </AlertDescription>
+            </Alert>
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+          <Button type="button" variant="outline" disabled={saving} onClick={() => setStep('type-select')}>
+            Voltar
+          </Button>
+          <Button type="button" size="lg" disabled={saving || !form.title.trim()} onClick={handleCreate}>
+            {saving ? (
+              <>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                Preparando...
+              </>
+            ) : (
+              <>
+                Começar guia
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </>
+            )}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto w-full max-w-4xl space-y-7 overflow-x-hidden px-4 py-5 sm:px-6 sm:py-8 lg:px-8">
       <StepHeader
