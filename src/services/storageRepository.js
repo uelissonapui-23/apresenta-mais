@@ -2,6 +2,7 @@ import { getSupabaseClient } from '@/lib/supabaseClient';
 
 const BUCKET = 'apresenta-mais-files';
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
 const ALLOWED_TYPES = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'application/pdf',
 ]);
@@ -12,6 +13,19 @@ function safeName(name) {
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
     .replace(/-+/g, '-')
     .slice(-120);
+}
+
+export async function createSignedUserFileUrl(path, expiresIn = SIGNED_URL_TTL_SECONDS) {
+  const normalizedPath = String(path || '').trim();
+  if (!normalizedPath) throw new Error('Caminho do arquivo inválido.');
+
+  const client = getSupabaseClient();
+  const { data, error } = await client.storage
+    .from(BUCKET)
+    .createSignedUrl(normalizedPath, expiresIn);
+
+  if (error) throw error;
+  return data?.signedUrl || '';
 }
 
 export async function uploadUserFile(file) {
@@ -32,6 +46,12 @@ export async function uploadUserFile(file) {
   });
   if (error) throw error;
 
-  const { data } = client.storage.from(BUCKET).getPublicUrl(path);
-  return { file_url: data.publicUrl, path, bucket: BUCKET };
+  const signedUrl = await createSignedUserFileUrl(path);
+  return {
+    file_url: signedUrl,
+    signed_url: signedUrl,
+    storage_path: path,
+    path,
+    bucket: BUCKET,
+  };
 }

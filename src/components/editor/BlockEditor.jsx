@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2, Copy, Eye, EyeOff, Star, ArrowUp, ArrowDown, ChevronUp, MoreVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Plus, Trash2, Copy, Eye, EyeOff, Star, ArrowUp, ArrowDown, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';

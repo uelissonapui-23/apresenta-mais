@@ -18,7 +18,6 @@ import {
   Sparkles,
   Target,
   Trash2,
-  XCircle,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import { normalizeHttpUrl } from '@/lib/safeUrl';
 import { Badge } from '@/components/ui/badge';
 
 function getAttachmentIcon(type) {
@@ -94,20 +95,21 @@ export default function BlockAttachmentsDisplay({ blockId, darkMode = false }) {
               <div className="space-y-2">
                 {attachments.map((att) => {
                   const Icon = getAttachmentIcon(att.attachment_type);
-                  const isImage = att.attachment_type === 'image' && att.file_url;
-                  const isVideo = att.attachment_type === 'video' && att.file_url;
+                  const safeFileUrl = normalizeHttpUrl(att.file_url);
+                  const isImage = att.attachment_type === 'image' && safeFileUrl;
+                  const isVideo = att.attachment_type === 'video' && safeFileUrl;
 
                   return (
                     <div key={att.id} className="overflow-hidden rounded-lg border border-current/10">
                       {isImage && (
                         <a
-                          href={att.file_url}
+                          href={safeFileUrl}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="block"
                         >
                           <img
-                            src={att.file_url}
+                            src={safeFileUrl}
                             alt={att.title || 'Imagem'}
                             className="max-h-60 w-full object-contain"
                             loading="lazy"
@@ -124,9 +126,9 @@ export default function BlockAttachmentsDisplay({ blockId, darkMode = false }) {
                             <p className={`truncate text-[10px] ${mutedClass}`}>{att.description}</p>
                           )}
                         </div>
-                        {att.file_url && (
+                        {safeFileUrl && (
                           <a
-                            href={att.file_url}
+                            href={safeFileUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className={`shrink-0 ${mutedClass} hover:text-current`}
@@ -138,7 +140,7 @@ export default function BlockAttachmentsDisplay({ blockId, darkMode = false }) {
                       {isVideo && (
                         <div className="px-2 pb-2">
                           <a
-                            href={att.file_url}
+                            href={safeFileUrl}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 rounded-lg border border-current/10 px-3 py-1.5 text-xs font-medium hover:bg-current/5"
@@ -161,7 +163,9 @@ export default function BlockAttachmentsDisplay({ blockId, darkMode = false }) {
                 Referências
               </p>
               <div className="space-y-2">
-                {references.map((ref) => (
+                {references.map((ref) => {
+                  const safeReferenceUrl = normalizeHttpUrl(ref.url);
+                  return (
                   <div
                     key={ref.id}
                     className="flex items-start gap-2 rounded-lg border border-current/10 p-2"
@@ -183,9 +187,9 @@ export default function BlockAttachmentsDisplay({ blockId, darkMode = false }) {
                         <p className={`mt-1 text-[10px] ${mutedClass}`}>Fonte: {ref.source}</p>
                       )}
                     </div>
-                    {ref.url && (
+                    {safeReferenceUrl && (
                       <a
-                        href={ref.url}
+                        href={safeReferenceUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className={`shrink-0 ${mutedClass} hover:text-current`}
@@ -194,7 +198,8 @@ export default function BlockAttachmentsDisplay({ blockId, darkMode = false }) {
                       </a>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

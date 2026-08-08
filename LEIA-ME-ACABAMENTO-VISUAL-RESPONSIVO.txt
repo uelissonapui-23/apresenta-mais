@@ -1,0 +1,53 @@
+APRESENTA+ — ACABAMENTO VISUAL E RESPONSIVO FINAL
+
+Esta atualização parte da versão que já recebeu a nova logo preta/vermelha.
+
+AJUSTES
+- melhor aproveitamento do espaço em monitores grandes;
+- sidebar desktop levemente maior e marca com mais presença;
+- conteúdo principal com largura maior sem ficar esticado demais;
+- mais folga inferior no celular para a navegação fixa não cobrir conteúdo;
+- cards de indicadores mais consistentes em telas pequenas;
+- em telas muito estreitas (<360px), indicadores passam para uma coluna;
+- último destaque roxo de "Criar com ajuda" substituído por vermelho;
+- elementos antigos violeta do onboarding removidos;
+- cores de status continuam semânticas (verde/azul/âmbar);
+- "Concluída" usa verde, não roxo;
+- Home, Biblioteca, Perfil e Configurações com melhor distribuição no desktop;
+- proteção contra overflow e diálogos em telas estreitas mantida.
+
+ARQUIVOS ALTERADOS
+src/index.css
+src/components/layout/AppLayout.jsx
+src/pages/Home.jsx
+src/pages/Library.jsx
+src/pages/Profile.jsx
+src/pages/Settings.jsx
+src/pages/Onboarding.jsx
+src/pages/Presentations.jsx
+src/pages/SessionHistory.jsx
+
+COMO APLICAR
+Extraia este ZIP diretamente na raiz do projeto e aceite substituir.
+
+Depois execute:
+
+npm run build
+
+Se passar:
+
+git add src/index.css src/components/layout/AppLayout.jsx src/pages/Home.jsx src/pages/Library.jsx src/pages/Profile.jsx src/pages/Settings.jsx src/pages/Onboarding.jsx src/pages/Presentations.jsx src/pages/SessionHistory.jsx
+git commit -m "Refina identidade visual e responsividade do Apresenta Mais"
+git push origin main
+
+VALIDAÇÃO
+- desktop 1366px e 1920px;
+- tablet ~768px;
+- celular 360-430px;
+- celular estreito ~320px;
+- Home, Apresentações, Modelos, Biblioteca, Temas, Perfil, Configurações;
+- criação, editor, ensaio e modais.
+
+Observação:
+O lint completo não pôde rodar neste ambiente porque o node_modules trazido do
+Windows tem executáveis sem permissão no Linux. O patch passou em git diff --check.

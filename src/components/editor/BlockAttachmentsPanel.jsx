@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
+import { normalizeHttpUrl } from '@/lib/safeUrl';
 import { useToast } from '@/components/ui/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -109,8 +110,13 @@ export default function BlockAttachmentsPanel({ blockId }) {
   }, [open, blockId, loadData]);
 
   const handleSaveAttachment = async () => {
-    if (!attachmentForm.file_url.trim()) {
-      toast({ title: 'Informe a URL do anexo', variant: 'destructive' });
+    const safeFileUrl = normalizeHttpUrl(attachmentForm.file_url);
+    if (!safeFileUrl) {
+      toast({
+        title: 'Informe uma URL válida',
+        description: 'Use um endereço iniciado por http:// ou https://.',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -123,7 +129,7 @@ export default function BlockAttachmentsPanel({ blockId }) {
       const created = await base44.entities.BlockAttachment.create({
         block_id: blockId,
         attachment_type: attachmentForm.attachment_type,
-        file_url: attachmentForm.file_url.trim(),
+        file_url: safeFileUrl,
         title: attachmentForm.title.trim(),
         description: attachmentForm.description.trim(),
         order_index: nextOrder,
@@ -145,6 +151,17 @@ export default function BlockAttachmentsPanel({ blockId }) {
       return;
     }
 
+    const rawReferenceUrl = referenceForm.url.trim();
+    const safeReferenceUrl = rawReferenceUrl ? normalizeHttpUrl(rawReferenceUrl) : '';
+    if (rawReferenceUrl && !safeReferenceUrl) {
+      toast({
+        title: 'Link da referência inválido',
+        description: 'Use um endereço iniciado por http:// ou https://.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       const created = await base44.entities.BlockReference.create({
@@ -153,7 +170,7 @@ export default function BlockAttachmentsPanel({ blockId }) {
         title: referenceForm.title.trim(),
         reference_text: referenceForm.reference_text.trim(),
         source: referenceForm.source.trim(),
-        url: referenceForm.url.trim(),
+        url: safeReferenceUrl,
       });
       setReferences((prev) => [created, ...prev]);
       setReferenceForm(EMPTY_REFERENCE);

@@ -14,7 +14,6 @@ import {
   Search,
   Sparkles,
   Trash2,
-  TrendingUp,
   Users,
   XCircle,
 } from 'lucide-react';

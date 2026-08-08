@@ -5,7 +5,6 @@ import {
   Crown,
   Edit3,
   Eye,
-  Image as ImageIcon,
   Loader2,
   Palette,
   Plus,
@@ -14,7 +13,6 @@ import {
   ShieldAlert,
   Sparkles,
   Trash2,
-  X,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
@@ -26,7 +24,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,

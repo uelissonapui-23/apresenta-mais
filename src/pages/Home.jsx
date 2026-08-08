@@ -16,7 +16,6 @@ import {
   BookOpen,
   CheckCircle2,
   Clock3,
-  FileText,
   LayoutTemplate,
   Loader2,
   MoreVertical,

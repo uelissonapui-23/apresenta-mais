@@ -1,0 +1,66 @@
+APRESENTA+ — AUDITORIA COMPLETA + CORREÇÕES FINAIS
+Data: 07/08/2026
+
+Este ZIP contém somente os arquivos que devem ser copiados/substituídos
+diretamente na RAIZ do projeto. Ele não contém .git, node_modules ou dist.
+
+PRINCIPAIS CORREÇÕES
+- RLS endurecido para bloquear contas inativas no próprio banco.
+- Validação de isolamento entre apresentações, blocos, sessões e templates.
+- Proteção contra ciclos em hierarquias de blocos.
+- Bucket apresenta-mais-files tornado privado.
+- Uploads passam a usar URLs assinadas temporárias.
+- Templates públicos protegidos contra publicação direta por usuário comum.
+- Proteção contra remoção/desativação do último administrador ativo.
+- Validação segura de URLs de anexos e referências (somente http/https).
+- Limpeza de erros de lint/imports inutilizados.
+- Configuração de typecheck coerente com o projeto JavaScript.
+- .env.example atualizado para Supabase-only.
+- Dependências não utilizadas removidas do package.json/package-lock.json.
+- Logo/manifest/favicon e ajustes visuais atuais preservados.
+- Script npm run check:security incluído.
+
+COMO APLICAR
+1. Faça um backup da pasta atual.
+2. Extraia este ZIP diretamente dentro da raiz:
+   D:\projeto desenvolvedor\APRESENTA MAIS\APRESENTA MAIS
+3. Aceite substituir os arquivos existentes.
+
+Depois rode:
+
+npm install
+npm run lint
+npm run typecheck
+npm run check:security
+npm run build
+
+Se todos passarem:
+
+git add .
+git commit -m "Aplica auditoria completa seguranca e isolamento"
+git push origin main
+
+IMPORTANTE
+A migration nova é:
+supabase/migrations/20260807234000_security_isolation_hardening.sql
+
+O GitHub Actions deve aplicá-la ao Supabase. Confira que o workflow ficou verde
+antes de considerar a publicação final concluída.
+
+Para verificar advisories de dependências no Windows:
+npm audit
+
+NÃO USE npm audit fix --force automaticamente. Breaking changes devem ser
+revisados antes.
+
+TESTE FINAL DEPOIS DO DEPLOY
+- cadastro/login/logout/recuperação de senha;
+- criar do zero e criar com ajuda;
+- editar, reordenar, anexos e referências;
+- duplicar/excluir apresentação;
+- ensaio e modo apresentação;
+- modelos, biblioteca, tags e temas;
+- perfil/configurações;
+- usuário comum tentando abrir /admin;
+- admin desativando conta de teste;
+- Console sem /api/apps/undefined e sem 400/403 inesperados.

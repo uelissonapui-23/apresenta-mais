@@ -8,8 +8,6 @@ import {
   Cloud,
   Crown,
   FileDown,
-  HardDrive,
-  Infinity as InfinityIcon,
   Megaphone,
   Loader2,
   Pencil,

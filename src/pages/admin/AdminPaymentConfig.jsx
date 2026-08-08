@@ -11,7 +11,6 @@ import {
 import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,

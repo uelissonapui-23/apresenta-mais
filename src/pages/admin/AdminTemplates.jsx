@@ -1,13 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   CheckCircle2,
   Copy,
   Eye,
-  FileText,
   Layers3,
   LayoutTemplate,
   Loader2,

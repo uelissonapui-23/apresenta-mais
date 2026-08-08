@@ -9,22 +9,17 @@ import {
   RefreshCw,
   Search,
   Shield,
-  ShieldCheck,
   X,
-  XCircle,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
 import useCurrentUser from '@/hooks/useCurrentUser';
 import { useToast } from '@/components/ui/use-toast';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
-  CardHeader,
-  CardTitle,
 } from '@/components/ui/card';
 import {
   Dialog,
