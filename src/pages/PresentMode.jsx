@@ -16,6 +16,7 @@ import {
   Flag,
   Fullscreen,
   List,
+  Loader2,
   LogOut,
   Maximize2,
   Minus,
@@ -1324,7 +1325,7 @@ export default function PresentMode() {
   return (
     <div
       ref={stageRef}
-      className={`fixed inset-0 z-[90] flex min-h-[100dvh] select-none flex-col overflow-hidden ${themeClasses}`}
+      className={`fixed inset-0 z-[90] flex min-h-[100dvh] select-none flex-col overflow-hidden ${themeClasses} ${motionClass} ${contrastClass}`}
       onClick={handleStageClick}
       onMouseMove={resetControlsTimer}
       onTouchStart={resetControlsTimer}
@@ -1342,283 +1343,314 @@ export default function PresentMode() {
         </div>
       )}
 
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-4 p-4 sm:p-6">
-        <div className={`min-w-0 transition-opacity ${showControls ? 'opacity-100' : 'opacity-0'}`}>
-          <p className="truncate text-xs font-semibold uppercase tracking-[0.16em] opacity-55">
-            {presentation?.title || 'Apresentação'}
-          </p>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-2">
-          {showTimer && (
-            <div className={`rounded-full px-3 py-1.5 font-mono text-xs shadow-sm backdrop-blur ${darkMode ? 'bg-white/10' : 'bg-black/5'}`}>
-              {formatTime(elapsed)}
-            </div>
-          )}
-
-          {!running && (
-            <Badge className="bg-amber-500 text-white hover:bg-amber-500">
-              Pausada
-            </Badge>
-          )}
-        </div>
-      </div>
-
-      <div
+      <header
         data-no-stage-click
-        className="fixed right-3 top-3 z-[90] sm:right-5 sm:top-5"
+        className={`absolute inset-x-0 top-0 z-40 px-3 pt-3 transition-all duration-300 sm:px-5 sm:pt-5 ${showControls ? 'translate-y-0 opacity-100' : 'pointer-events-none -translate-y-3 opacity-0'}`}
       >
-        <Button
-          type="button"
-          variant="destructive"
-          size="sm"
-          onClick={handleExitPresentation}
-          disabled={saving}
-          className="gap-2 shadow-2xl"
-          aria-label="Sair da apresentação e voltar ao editor"
-        >
-          {saving ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <LogOut className="h-4 w-4" />
-          )}
-          <span>Sair</span>
-        </Button>
-      </div>
+        <div className={`mx-auto flex max-w-7xl items-center gap-3 rounded-2xl border px-3 py-2 shadow-xl backdrop-blur-xl sm:px-4 ${panelClasses}`}>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[11px] font-semibold uppercase tracking-[0.14em] opacity-45">
+              Apresentando agora
+            </p>
+            <p className="truncate text-sm font-semibold sm:text-base">
+              {presentation?.title || 'Apresentação'}
+            </p>
+          </div>
 
-      <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-28 pt-20 sm:px-6 md:px-10 lg:px-12">
-        <div className="mx-auto grid min-h-full w-full max-w-7xl items-center gap-5 lg:grid-cols-[minmax(0,1fr)_300px] xl:gap-7">
-        <article
-          className={`w-full rounded-[28px] border border-current/10 p-6 shadow-2xl backdrop-blur-sm sm:p-9 lg:p-12 ${darkMode ? 'bg-white/[0.035]' : 'bg-black/[0.025]'} ${accessibility.left_aligned_text ? 'text-left' : 'text-center'} ${accessibility.increased_spacing ? 'space-y-3' : ''}`}
-        >
-          <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
-            <Badge variant="outline" className="border-current/20 bg-transparent text-current">
-              {currentIndex + 1} de {visibleBlocks.length}
+          <div className="hidden items-center gap-2 sm:flex">
+            <Badge variant="outline" className="border-current/15 bg-transparent text-current">
+              Tópico {currentIndex + 1}/{visibleBlocks.length}
             </Badge>
-
-            {currentBlock?.is_essential && (
+            {showTimer && (
+              <div className={`rounded-xl px-3 py-1.5 font-mono text-xs ${darkMode ? 'bg-white/8' : 'bg-black/[0.04]'}`}>
+                {formatTime(elapsed)}
+              </div>
+            )}
+            {!running && (
               <Badge className="bg-amber-500 text-white hover:bg-amber-500">
-                <Flag className="mr-1 h-3 w-3" />
-                Essencial
+                Pausada
               </Badge>
             )}
           </div>
 
-          <h1
-            className="mx-auto max-w-4xl break-words font-bold leading-[1.08] tracking-tight"
-            style={{ fontSize: `${fontSize + 10}px` }}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleExitPresentation}
+            disabled={saving}
+            className="shrink-0 gap-2 text-red-500 hover:bg-red-500/10 hover:text-red-500"
+            aria-label="Sair da apresentação e voltar ao editor"
           >
-            {currentBlock?.title}
-          </h1>
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <LogOut className="h-4 w-4" />
+            )}
+            <span className="hidden sm:inline">Sair</span>
+          </Button>
+        </div>
+      </header>
 
-          {detailValue >= 2 && currentBlock?.summary && (
-            <p
-              className={`mx-auto mt-7 max-w-4xl whitespace-pre-wrap leading-relaxed ${mutedClasses}`}
-              style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 3)}px` }}
-            >
-              {currentBlock.summary}
-            </p>
-          )}
+      <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-32 pt-20 sm:px-5 sm:pb-36 sm:pt-24 lg:px-8">
+        <div
+          className={`mx-auto grid min-h-full w-full items-center gap-5 xl:gap-7 ${showNextBlock ? 'max-w-[1500px] xl:grid-cols-[minmax(0,1fr)_320px]' : 'max-w-6xl'}`}
+        >
+          <article
+            className={`relative w-full overflow-hidden rounded-[30px] border border-current/10 px-5 py-7 shadow-[0_24px_80px_rgba(15,23,42,0.14)] sm:px-8 sm:py-10 lg:px-12 lg:py-14 ${darkMode ? 'bg-white/[0.035]' : 'bg-black/[0.018]'} ${accessibility.left_aligned_text ? 'text-left' : 'text-center'}`}
+          >
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-current/[0.025] to-transparent" />
 
-          {detailValue >= 3 && currentBlock?.content && (
-            <div
-              className="mx-auto mt-8 max-w-4xl whitespace-pre-wrap leading-[1.65]"
-              style={{ fontSize: `${fontSize}px` }}
-            >
-              {currentBlock.content}
-            </div>
-          )}
-
-          {detailValue >= 4
-            && showAdditional
-            && currentBlock?.additional_content && (
-            <div
-              className={`mx-auto mt-8 max-w-4xl whitespace-pre-wrap rounded-2xl border border-current/10 p-5 text-left leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.03]'}`}
-              style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
-            >
-              {currentBlock.additional_content}
-            </div>
-          )}
-
-          {currentBlock?.id && (
-            <div className="mx-auto mt-8 max-w-4xl text-left">
-              <BlockAttachmentsDisplay blockId={currentBlock.id} darkMode={darkMode} />
-            </div>
-          )}
-        </article>
-
-        <aside data-no-stage-click className={`hidden self-center rounded-2xl border p-4 shadow-xl lg:block ${panelClasses}`}>
-          <p className="text-[11px] font-bold uppercase tracking-[0.16em] opacity-50">A seguir</p>
-          {nextBlock ? (
-            <>
-              <p className="mt-3 line-clamp-3 text-base font-semibold leading-snug">{nextBlock.title}</p>
-              {nextBlock.summary && <p className="mt-2 line-clamp-4 text-sm leading-relaxed opacity-60">{nextBlock.summary}</p>}
-              <div className="mt-4 flex items-center justify-between border-t border-current/10 pt-3 text-xs opacity-55">
-                <span>{currentIndex + 2} de {visibleBlocks.length}</span>
-                <span>{nextBlock.estimated_duration_seconds > 0 ? formatTime(nextBlock.estimated_duration_seconds) : 'Próximo tópico'}</span>
+            <div className={`relative mx-auto flex max-w-5xl flex-col ${accessibility.increased_spacing ? 'gap-4' : ''}`}>
+              <div className={`mb-6 flex flex-wrap items-center gap-2 ${accessibility.left_aligned_text ? 'justify-start' : 'justify-center'}`}>
+                <Badge variant="outline" className="border-current/15 bg-transparent text-current">
+                  {currentIndex + 1} de {visibleBlocks.length}
+                </Badge>
+                {currentBlock?.is_essential && (
+                  <Badge className="bg-amber-500 text-white hover:bg-amber-500">
+                    <Flag className="mr-1 h-3 w-3" />
+                    Ponto essencial
+                  </Badge>
+                )}
+                {!running && (
+                  <Badge className="sm:hidden bg-amber-500 text-white hover:bg-amber-500">
+                    Pausada
+                  </Badge>
+                )}
               </div>
-            </>
-          ) : (
-            <div className="mt-3 rounded-xl border border-dashed border-current/15 p-4 text-sm opacity-60">Último tópico da apresentação.</div>
+
+              <h1
+                className="break-words font-bold leading-[1.06] tracking-[-0.025em]"
+                style={{ fontSize: `${fontSize + 10}px` }}
+              >
+                {currentBlock?.title}
+              </h1>
+
+              {detailValue >= 2 && currentBlock?.summary && (
+                <p
+                  className={`mt-6 whitespace-pre-wrap leading-relaxed ${mutedClasses}`}
+                  style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 3)}px` }}
+                >
+                  {currentBlock.summary}
+                </p>
+              )}
+
+              {detailValue >= 3 && currentBlock?.content && (
+                <div
+                  className="mt-7 whitespace-pre-wrap leading-[1.68]"
+                  style={{ fontSize: `${fontSize}px` }}
+                >
+                  {currentBlock.content}
+                </div>
+              )}
+
+              {detailValue >= 4 && showAdditional && currentBlock?.additional_content && (
+                <div
+                  className={`mt-8 whitespace-pre-wrap rounded-2xl border border-current/10 p-5 text-left leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.025]'}`}
+                  style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
+                >
+                  {currentBlock.additional_content}
+                </div>
+              )}
+
+              {currentBlock?.id && (
+                <div className="mt-8 text-left">
+                  <BlockAttachmentsDisplay blockId={currentBlock.id} darkMode={darkMode} />
+                </div>
+              )}
+
+              <div className={`mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-current/10 pt-5 text-xs opacity-55 ${accessibility.left_aligned_text ? 'justify-start' : 'justify-center'}`}>
+                <span>{progressPercent}% concluído</span>
+                <span>{completedCount} apresentados</span>
+                {currentBlock?.estimated_duration_seconds > 0 && (
+                  <span>Tempo deste tópico: {formatTime(currentBlock.estimated_duration_seconds)}</span>
+                )}
+              </div>
+            </div>
+          </article>
+
+          {showNextBlock && (
+            <aside data-no-stage-click className={`hidden self-center overflow-hidden rounded-[24px] border shadow-xl xl:block ${panelClasses}`}>
+              <div className={`border-b border-current/10 px-5 py-4 ${darkMode ? 'bg-white/[0.035]' : 'bg-black/[0.025]'}`}>
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] opacity-45">A seguir</p>
+              </div>
+
+              <div className="p-5">
+                {nextBlock ? (
+                  <>
+                    <p className="line-clamp-4 text-lg font-semibold leading-snug">{nextBlock.title}</p>
+                    {nextBlock.summary && (
+                      <p className="mt-3 line-clamp-5 text-sm leading-relaxed opacity-60">{nextBlock.summary}</p>
+                    )}
+                    <div className="mt-5 flex items-center justify-between border-t border-current/10 pt-4 text-xs opacity-55">
+                      <span>{currentIndex + 2} de {visibleBlocks.length}</span>
+                      <span>{nextBlock.estimated_duration_seconds > 0 ? formatTime(nextBlock.estimated_duration_seconds) : 'Próximo tópico'}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-current/15 p-4 text-sm opacity-60">
+                    Este é o último tópico da apresentação.
+                  </div>
+                )}
+
+                {currentBlock?.presenter_notes && (
+                  <Button
+                    variant="outline"
+                    className="mt-4 w-full justify-start gap-2"
+                    onClick={() => setShowNotes(true)}
+                  >
+                    <Text className="h-4 w-4" />
+                    Abrir minhas notas
+                  </Button>
+                )}
+              </div>
+            </aside>
           )}
-          {currentBlock?.presenter_notes && (
-            <Button variant="ghost" className="mt-3 w-full justify-start" onClick={() => setShowNotes(true)}>
-              <Text className="mr-2 h-4 w-4" />
-              Ver minhas notas
-            </Button>
-          )}
-        </aside>
         </div>
       </main>
 
       {showNotes && currentBlock?.presenter_notes && (
         <aside
           data-no-stage-click
-          className={`absolute bottom-28 left-4 right-4 z-50 max-h-[38vh] overflow-y-auto rounded-2xl border p-4 shadow-2xl backdrop-blur md:left-auto md:right-6 md:w-[420px] ${darkMode ? 'border-amber-300/20 bg-slate-900/95 text-slate-100' : 'border-amber-700/15 bg-amber-50/95 text-amber-950'}`}
+          className={`absolute bottom-28 left-3 right-3 z-50 max-h-[44vh] overflow-y-auto rounded-[22px] border p-4 shadow-2xl backdrop-blur-xl sm:bottom-32 sm:left-auto sm:right-5 sm:w-[440px] sm:p-5 ${darkMode ? 'border-amber-300/20 bg-slate-900/95 text-slate-100' : 'border-amber-700/15 bg-amber-50/95 text-amber-950'}`}
         >
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="text-xs font-bold uppercase tracking-wide">
-              Notas do apresentador
-            </span>
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold uppercase tracking-wide">Minhas notas</span>
+              <p className="mt-1 text-xs opacity-55">Só você vê este conteúdo.</p>
+            </div>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-8 w-8"
               onClick={() => setShowNotes(false)}
+              aria-label="Fechar notas"
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
-          <p className="select-text whitespace-pre-wrap text-sm leading-relaxed">
+          <p className="select-text whitespace-pre-wrap text-sm leading-relaxed sm:text-base">
             {currentBlock.presenter_notes}
           </p>
         </aside>
       )}
 
       {showNextBlock && nextBlock && showControls && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[98px] z-20 px-4 text-center lg:hidden">
-          <p className="truncate text-xs opacity-50">
-            Próximo: <span className="font-medium">{nextBlock.title}</span>
-          </p>
+        <div className="pointer-events-none absolute inset-x-0 bottom-[112px] z-20 px-4 text-center xl:hidden">
+          <div className={`mx-auto max-w-xl rounded-full border px-4 py-2 text-xs shadow-sm backdrop-blur ${panelClasses}`}>
+            <span className="opacity-50">A seguir: </span>
+            <span className="font-medium">{nextBlock.title}</span>
+          </div>
         </div>
       )}
 
       <div
         data-no-stage-click
-        className={`absolute inset-x-0 bottom-0 z-40 p-3 transition-all duration-300 sm:p-5 ${showControls ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-6 opacity-0'}`}
+        className={`absolute inset-x-0 bottom-0 z-40 p-2.5 transition-all duration-300 sm:p-4 ${showControls ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-5 opacity-0'}`}
       >
-        <div className={`mx-auto flex max-w-4xl items-center gap-2 rounded-2xl border p-2 shadow-2xl backdrop-blur-xl ${panelClasses} ${accessibility.large_controls ? '[&_button]:h-12 [&_button]:w-12' : ''}`}>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={goPrevious}
-            disabled={!previousBlock || saving}
-            aria-label="Tópico anterior"
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </Button>
-
-          <div className="flex min-w-0 flex-1 items-center justify-center gap-1 sm:gap-2">
+        <div className={`mx-auto max-w-5xl rounded-[22px] border p-2 shadow-2xl backdrop-blur-xl ${panelClasses}`}>
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
             <Button
               variant="ghost"
-              size="icon"
-              onClick={() => setShowTopicSheet(true)}
-              aria-label="Abrir tópicos"
+              onClick={goPrevious}
+              disabled={!previousBlock || saving}
+              className={`gap-2 px-3 sm:px-4 ${controlSizeClass}`}
+              aria-label="Tópico anterior"
             >
-              <List className="h-5 w-5" />
+              <ChevronLeft className="h-5 w-5" />
+              <span className="hidden md:inline">Anterior</span>
             </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={togglePause}
-              aria-label={running ? 'Pausar' : 'Retomar'}
-            >
-              {running ? (
-                <Pause className="h-5 w-5" />
-              ) : (
-                <Play className="h-5 w-5" />
-              )}
-            </Button>
+            <div className="flex min-w-0 items-center justify-center gap-1 sm:gap-2">
+              <Button
+                variant="ghost"
+                onClick={() => setShowTopicSheet(true)}
+                className={`gap-2 px-3 ${controlSizeClass}`}
+                aria-label="Abrir roteiro"
+              >
+                <List className="h-5 w-5" />
+                <span className="hidden lg:inline">Roteiro</span>
+              </Button>
 
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => markCurrent('completed')}
-              aria-label="Marcar como apresentado"
-              className="hidden text-emerald-500 sm:inline-flex"
-            >
-              <Check className="h-5 w-5" />
-            </Button>
+              <Button
+                onClick={togglePause}
+                className={`min-w-[112px] gap-2 rounded-xl px-4 shadow-sm sm:min-w-[138px] ${controlSizeClass}`}
+                aria-label={running ? 'Pausar apresentação' : 'Continuar apresentação'}
+              >
+                {running ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
+                <span>{running ? 'Pausar' : 'Continuar'}</span>
+              </Button>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="Mais ações">
-                  <MoreHorizontal className="h-5 w-5" />
+              {currentBlock?.presenter_notes && (
+                <Button
+                  variant={showNotes ? 'secondary' : 'ghost'}
+                  onClick={() => setShowNotes((value) => !value)}
+                  className={`gap-2 px-3 ${controlSizeClass}`}
+                  aria-label={showNotes ? 'Ocultar notas' : 'Mostrar notas'}
+                >
+                  <Text className="h-5 w-5" />
+                  <span className="hidden lg:inline">Notas</span>
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="center" className="w-52">
-                <DropdownMenuItem onClick={() => markCurrent('completed')}>
-                  <Check className="mr-2 h-4 w-4 text-emerald-500" />
-                  Marcar apresentado
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => markCurrent('revisit')}>
-                  <RotateCcw className="mr-2 h-4 w-4 text-amber-500" />
-                  Marcar para revisitar
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => markCurrent('skipped')}>
-                  <SkipForward className="mr-2 h-4 w-4" />
-                  Pular tópico
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setShowNotes((value) => !value)}>
-                  {showNotes ? (
-                    <EyeOff className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Eye className="mr-2 h-4 w-4" />
-                  )}
-                  {showNotes ? 'Ocultar notas' : 'Mostrar notas'}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={requestFullscreen}>
-                  <Maximize2 className="mr-2 h-4 w-4" />
-                  Tela cheia
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={requestRestartSession}>
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Recomeçar apresentação
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => setEndDialogOpen(true)} className="text-destructive">
-                  <X className="mr-2 h-4 w-4" />
-                  Encerrar apresentação
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              )}
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className={controlSizeClass} aria-label="Mais ações">
+                    <MoreHorizontal className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center" className="w-56">
+                  <DropdownMenuItem onClick={() => markCurrent('completed')}>
+                    <Check className="mr-2 h-4 w-4 text-emerald-500" />
+                    Marcar como apresentado
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => markCurrent('revisit')}>
+                    <RotateCcw className="mr-2 h-4 w-4 text-amber-500" />
+                    Quero voltar neste tópico
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => markCurrent('skipped')}>
+                    <SkipForward className="mr-2 h-4 w-4" />
+                    Pular este tópico
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={requestFullscreen}>
+                    <Maximize2 className="mr-2 h-4 w-4" />
+                    Usar tela cheia
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={requestRestartSession}>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Recomeçar apresentação
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setShowSettingsSheet(true)}>
+                    <Settings className="mr-2 h-4 w-4" />
+                    Ajustar visualização
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setEndDialogOpen(true)} className="text-destructive">
+                    <X className="mr-2 h-4 w-4" />
+                    Encerrar apresentação
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
             <Button
               variant="ghost"
-              size="icon"
-              onClick={() => setShowSettingsSheet(true)}
-              aria-label="Configurações"
+              onClick={goNext}
+              disabled={saving}
+              className={`gap-2 px-3 sm:px-4 ${controlSizeClass}`}
+              aria-label="Próximo tópico"
             >
-              <Settings className="h-5 w-5" />
+              <span className="hidden md:inline">Próximo</span>
+              <ChevronRight className="h-5 w-5" />
             </Button>
           </div>
 
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={goNext}
-            disabled={saving}
-            aria-label="Próximo tópico"
-          >
-            <ChevronRight className="h-6 w-6" />
-          </Button>
-        </div>
-
-        <div className="mx-auto mt-2 flex max-w-4xl items-center justify-between px-2 text-[11px] opacity-55">
-          <span>{completedCount} concluídos</span>
-          <span>{progressPercent}% apresentado</span>
-          <span>{formatTime(plannedSeconds)} planejados</span>
+          <div className="mt-2 flex items-center justify-center gap-3 border-t border-current/10 px-2 pt-2 text-[11px] opacity-50 sm:justify-between">
+            <span className="hidden sm:inline">{completedCount} apresentados</span>
+            <span>{progressPercent}% concluído</span>
+            <span className="hidden sm:inline">Plano: {formatTime(plannedSeconds)}</span>
+          </div>
         </div>
       </div>
 
