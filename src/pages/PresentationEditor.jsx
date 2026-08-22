@@ -23,6 +23,8 @@ import {
   Save,
   ScrollText,
   Settings2,
+  Sparkles,
+  PanelTop,
 } from 'lucide-react';
 
 import { base44 } from '@/api/base44Client';
@@ -49,10 +51,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const VIEW_OPTIONS = [
-  { key: 'structure', icon: List, label: 'Organizar', description: 'Tópicos e níveis' },
-  { key: 'text', icon: FileText, label: 'Escrever', description: 'Texto contínuo' },
-  { key: 'cards', icon: LayoutGrid, label: 'Visualizar', description: 'Cartões de conteúdo' },
-  { key: 'script', icon: ScrollText, label: 'Roteiro', description: 'Preparar sua fala' },
+  { key: 'structure', icon: List, label: 'Organizar', description: 'Monte a ordem e a hierarquia dos tópicos.' },
+  { key: 'text', icon: FileText, label: 'Escrever', description: 'Concentre-se no texto corrido da apresentação.' },
+  { key: 'cards', icon: LayoutGrid, label: 'Visualizar', description: 'Veja cada tópico como um cartão independente.' },
+  { key: 'script', icon: ScrollText, label: 'Roteiro', description: 'Leia o fluxo como você pretende apresentar.' },
 ];
 
 const DEFAULT_PREFERENCES = {
@@ -254,6 +256,7 @@ export default function PresentationEditor() {
   const [showTypeSelector, setShowTypeSelector] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteMode, setDeleteMode] = useState('move_children');
+  const [showSummary, setShowSummary] = useState(false);
 
   const addParentRef = useRef(null);
   const mountedRef = useRef(true);
@@ -1244,16 +1247,11 @@ export default function PresentationEditor() {
   }
 
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-col overflow-x-hidden">
-      <div className="sticky top-0 z-30 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="flex min-w-0 items-center justify-between gap-2 px-3 py-2 sm:px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <Button
-              asChild
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 shrink-0"
-            >
+    <div className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-col overflow-x-hidden bg-muted/10">
+      <div className="sticky top-0 z-30 border-b border-border/80 bg-background/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center justify-between gap-3 px-3 py-3 sm:px-5 lg:px-8">
+          <div className="flex min-w-0 items-center gap-3">
+            <Button asChild variant="outline" size="icon" className="h-10 w-10 shrink-0 rounded-xl">
               <Link to="/presentations" aria-label="Voltar às apresentações">
                 <ChevronLeft className="h-5 w-5" />
               </Link>
@@ -1261,74 +1259,53 @@ export default function PresentationEditor() {
 
             <div className="min-w-0">
               <div className="flex min-w-0 items-center gap-2">
-                <h1 className="truncate text-sm font-semibold sm:text-base">
+                <h1 className="truncate text-base font-bold sm:text-lg lg:text-xl">
                   {presentation.title || 'Apresentação sem título'}
                 </h1>
                 <AutosaveIndicator status={saveStatus} />
               </div>
-              <p className="hidden truncate text-xs text-muted-foreground sm:block">
-                {orderedBlocks.length} blocos · {formatDuration(totalDuration)}
+              <p className="mt-0.5 hidden truncate text-xs text-muted-foreground sm:block">
+                Seu espaço de criação · {orderedBlocks.length} tópicos · {formatDuration(totalDuration)} estimados
               </p>
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-2">
             <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9"
-              onClick={handleRefresh}
-              disabled={refreshing || processing}
-              aria-label="Atualizar editor"
+              variant="outline"
+              size="sm"
+              className="hidden h-10 rounded-xl md:inline-flex"
+              onClick={() => setShowSummary((current) => !current)}
             >
-              <RefreshCw
-                className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
-              />
+              <PanelTop className="mr-2 h-4 w-4" />
+              {showSummary ? 'Ocultar resumo' : 'Ver resumo'}
             </Button>
 
-            <Button asChild variant="ghost" size="icon" className="h-9 w-9">
-              <Link
-                to={`/presentations/${id}/overview`}
-                aria-label="Abrir visão geral"
-              >
-                <Eye className="h-4 w-4" />
+            <Button asChild variant="outline" size="sm" className="hidden h-10 rounded-xl sm:inline-flex">
+              <Link to={`/presentations/${id}/overview`}>
+                <Eye className="mr-2 h-4 w-4" />
+                Prévia
               </Link>
             </Button>
 
-            <Button asChild variant="ghost" size="icon" className="h-9 w-9">
-              <Link to={`/rehearsal/${id}`} aria-label="Iniciar ensaio">
-                <Play className="h-4 w-4" />
+            <Button asChild size="sm" className="h-10 rounded-xl px-4 shadow-sm">
+              <Link to={`/rehearsal/${id}`}>
+                <Play className="mr-2 h-4 w-4" />
+                Ensaiar
               </Link>
             </Button>
-          </div>
-        </div>
 
-        <div className="flex min-w-0 items-stretch gap-2 overflow-x-auto px-3 pb-3 sm:px-5">
-          {VIEW_OPTIONS.map((option) => {
-            const Icon = option.icon;
-            return (
-              <Button
-                key={option.key}
-                variant={viewMode === option.key ? 'default' : 'ghost'}
-                size="sm"
-                className={`h-auto min-w-[138px] shrink-0 justify-start rounded-xl px-3 py-2.5 text-left ${viewMode === option.key ? 'shadow-sm' : 'border border-transparent hover:border-border'}`}
-                onClick={() => handleViewModeChange(option.key)}
-              >
-                <Icon className="mr-2 h-4 w-4 shrink-0" />
-                <span className="min-w-0"><span className="block text-xs font-semibold">{option.label}</span><span className={`block text-[10px] font-normal ${viewMode === option.key ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>{option.description}</span></span>
-              </Button>
-            );
-          })}
-
-          <div className="ml-auto flex shrink-0 items-center gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 gap-1 text-xs">
-                  <Settings2 className="h-3.5 w-3.5" />
-                  Opções
+                <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl" aria-label="Mais opções">
+                  <Settings2 className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleRefresh} disabled={refreshing || processing}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Atualizar editor
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setAllCollapsed(false)}>
                   <ChevronsUpDown className="mr-2 h-4 w-4" />
                   Expandir todos
@@ -1341,139 +1318,199 @@ export default function PresentationEditor() {
                 <DropdownMenuItem asChild>
                   <Link to={`/presentations/${id}/overview`}>
                     <Eye className="mr-2 h-4 w-4" />
-                    Ver visão geral
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={`/rehearsal/${id}`}>
-                    <Play className="mr-2 h-4 w-4" />
-                    Iniciar ensaio
+                    Abrir prévia completa
                   </Link>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
         </div>
-
-        <div className="overflow-x-auto px-3 pb-2 sm:px-4">
-          <DetailLevelControl
-            value={detailLevel}
-            onChange={setDetailLevel}
-          />
-        </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-3 py-5 sm:px-6 md:py-7 lg:px-8">
-        <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border bg-card px-4 py-3 text-sm shadow-sm">
-          <span><strong className="text-foreground">{orderedBlocks.length}</strong> <span className="text-muted-foreground">tópicos</span></span>
-          <span><strong className="text-foreground">{visibleBlockCount}</strong> <span className="text-muted-foreground">visíveis</span></span>
-          <span><strong className="text-foreground">{essentialCount}</strong> <span className="text-muted-foreground">essenciais</span></span>
-          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-4 w-4 text-primary" /><strong className="text-foreground">{formatDuration(totalDuration)}</strong> <span className="text-muted-foreground">estimados</span></span>
-          <span className="ml-auto hidden text-xs text-muted-foreground md:inline">Tudo é salvo automaticamente enquanto você edita.</span>
-        </div>
-
-        {orderedBlocks.length > 0 && !processing && (
-          <div className="mb-3 flex items-center gap-2 rounded-lg border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-            Segure o ícone de seis pontos e arraste o tópico. A nova ordem é salva e vale para todos os modos.
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-3 py-5 sm:px-5 md:py-7 lg:px-8">
+        <section className="mb-5 rounded-2xl border bg-background p-3 shadow-sm sm:p-4 lg:p-5">
+          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+                <Sparkles className="h-3.5 w-3.5" />
+                Como você quer trabalhar agora?
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Troque de modo sem perder conteúdo. Cada visão usa a mesma apresentação.
+              </p>
+            </div>
+            <Badge variant="secondary" className="w-fit">{orderedBlocks.length} tópicos</Badge>
           </div>
+
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            {VIEW_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              const active = viewMode === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => handleViewModeChange(option.key)}
+                  className={`group min-w-0 rounded-xl border p-3 text-left transition-all sm:p-4 ${
+                    active
+                      ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
+                      : 'border-border/80 bg-background hover:border-primary/40 hover:bg-muted/30'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground group-hover:bg-primary/10 group-hover:text-primary'}`}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold">{option.label}</span>
+                      <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-4 rounded-xl border bg-muted/20 p-3 sm:p-4">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold">Quanto detalhe mostrar</p>
+                <p className="text-xs text-muted-foreground">Ajuste a quantidade de informação sem alterar o conteúdo salvo.</p>
+              </div>
+            </div>
+            <DetailLevelControl value={detailLevel} onChange={setDetailLevel} />
+          </div>
+        </section>
+
+        {(showSummary || false) && (
+          <section className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
+            {[
+              ['Tópicos', orderedBlocks.length],
+              ['Visíveis', visibleBlockCount],
+              ['Essenciais', essentialCount],
+              ['Duração', formatDuration(totalDuration)],
+            ].map(([label, value]) => (
+              <Card key={label} className="border-border/70 shadow-sm">
+                <CardContent className="p-4">
+                  <p className="text-xs font-medium text-muted-foreground">{label}</p>
+                  <p className="mt-1 text-xl font-bold">{value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </section>
         )}
 
-        {processing && (
-          <div className="mb-3 flex items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Processando alteração...
-          </div>
-        )}
-
-        {orderedBlocks.length === 0 ? (
-          <Card className="border-dashed">
-            <EmptyState
-              title="Nenhum bloco ainda"
-              description="Adicione o primeiro bloco para começar a construir sua apresentação."
-              actionLabel="Adicionar bloco"
-              onAction={() => {
+        <section className="min-w-0 flex-1 rounded-2xl border bg-background shadow-sm">
+          <div className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div>
+              <h2 className="text-base font-bold">
+                {VIEW_OPTIONS.find((option) => option.key === viewMode)?.label || 'Conteúdo'}
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {VIEW_OPTIONS.find((option) => option.key === viewMode)?.description}
+              </p>
+            </div>
+            <Button
+              className="w-full rounded-xl sm:w-auto"
+              onClick={() => {
                 addParentRef.current = null;
                 setShowTypeSelector(true);
               }}
-            />
-          </Card>
-        ) : (
-          <div className="min-w-0 space-y-4">
-            {viewMode === 'structure' && (
-              <ViewStructure
-                blocks={orderedBlocks}
-                blockTypes={blockTypes}
-                detailLevel={detailLevel}
-                onUpdate={handleUpdateBlock}
-                onDelete={openDeleteDialog}
-                onDuplicate={handleDuplicate}
-                onMoveUp={handleMoveUp}
-                onMoveDown={handleMoveDown}
-                onIndent={handleIndent}
-                onOutdent={handleOutdent}
-                onAddChild={handleAddChild}
-                onDragReorder={handleDragReorder}
-                dragDisabled={processing}
-              />
+              disabled={processing}
+            >
+              <Plus className="mr-2 h-4 w-4" />
+              Novo tópico
+            </Button>
+          </div>
+
+          <div className="p-3 sm:p-5 lg:p-6">
+            {orderedBlocks.length > 0 && !processing && viewMode === 'structure' && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-dashed bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
+                <LayoutGrid className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>Arraste pelo ícone de pontos para reorganizar. A ordem é salva automaticamente.</span>
+              </div>
             )}
 
-            {viewMode === 'text' && (
-              <ViewText
-                blocks={orderedBlocks}
-                detailLevel={detailLevel}
-                onDragReorder={handleDragReorder}
-                dragDisabled={processing}
-              />
+            {processing && (
+              <div className="mb-4 flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Salvando sua alteração...
+              </div>
             )}
 
-            {viewMode === 'cards' && (
-              <ViewCards
-                blocks={orderedBlocks}
-                blockTypes={blockTypes}
-                detailLevel={detailLevel}
-                onDragReorder={handleDragReorder}
-                dragDisabled={processing}
-              />
-            )}
+            {orderedBlocks.length === 0 ? (
+              <div className="py-4">
+                <EmptyState
+                  title="Comece pelo primeiro tópico"
+                  description="Crie um tópico principal. Depois você pode adicionar subtópicos, notas e organizar tudo sem perder o que escreveu."
+                  actionLabel="Criar primeiro tópico"
+                  onAction={() => {
+                    addParentRef.current = null;
+                    setShowTypeSelector(true);
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="min-w-0">
+                {viewMode === 'structure' && (
+                  <ViewStructure
+                    blocks={orderedBlocks}
+                    blockTypes={blockTypes}
+                    detailLevel={detailLevel}
+                    onUpdate={handleUpdateBlock}
+                    onDelete={openDeleteDialog}
+                    onDuplicate={handleDuplicate}
+                    onMoveUp={handleMoveUp}
+                    onMoveDown={handleMoveDown}
+                    onIndent={handleIndent}
+                    onOutdent={handleOutdent}
+                    onAddChild={handleAddChild}
+                    onDragReorder={handleDragReorder}
+                    dragDisabled={processing}
+                  />
+                )}
 
-            {viewMode === 'script' && (
-              <ViewScript
-                blocks={orderedBlocks}
-                detailLevel={detailLevel}
-                onDragReorder={handleDragReorder}
-                dragDisabled={processing}
-              />
+                {viewMode === 'text' && (
+                  <ViewText blocks={orderedBlocks} detailLevel={detailLevel} onDragReorder={handleDragReorder} dragDisabled={processing} />
+                )}
+
+                {viewMode === 'cards' && (
+                  <ViewCards blocks={orderedBlocks} blockTypes={blockTypes} detailLevel={detailLevel} onDragReorder={handleDragReorder} dragDisabled={processing} />
+                )}
+
+                {viewMode === 'script' && (
+                  <ViewScript blocks={orderedBlocks} detailLevel={detailLevel} onDragReorder={handleDragReorder} dragDisabled={processing} />
+                )}
+              </div>
             )}
           </div>
-        )}
 
-        <div className="flex justify-center py-6">
-          <Button
-            variant="outline"
-            className="w-full gap-2 sm:w-auto"
-            onClick={() => {
-              addParentRef.current = null;
-              setShowTypeSelector(true);
-            }}
-            disabled={processing}
-          >
-            <Plus className="h-4 w-4" />
-            Adicionar bloco
-          </Button>
-        </div>
+          {orderedBlocks.length > 0 && (
+            <div className="border-t px-4 py-4 sm:px-5">
+              <Button
+                variant="outline"
+                className="w-full gap-2 rounded-xl sm:w-auto"
+                onClick={() => {
+                  addParentRef.current = null;
+                  setShowTypeSelector(true);
+                }}
+                disabled={processing}
+              >
+                <Plus className="h-4 w-4" />
+                Adicionar outro tópico
+              </Button>
+            </div>
+          )}
+        </section>
 
-        <div className="mb-5 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
-          <Badge variant="outline">{orderedBlocks.length} blocos</Badge>
-          <Badge variant="outline">
-            <Clock3 className="mr-1 h-3 w-3" />
-            {formatDuration(totalDuration)} estimados
-          </Badge>
-          <Badge variant="outline">
-            <Save className="mr-1 h-3 w-3" />
-            Salvamento automático
-          </Badge>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+          <Badge variant="outline">{orderedBlocks.length} tópicos</Badge>
+          <Badge variant="outline"><Clock3 className="mr-1 h-3 w-3" />{formatDuration(totalDuration)} estimados</Badge>
+          <Badge variant="outline"><Save className="mr-1 h-3 w-3" />Salvamento automático</Badge>
         </div>
-      </div>
+      </main>
 
       <BlockTypeSelector
         open={showTypeSelector}
