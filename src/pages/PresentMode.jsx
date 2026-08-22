@@ -507,28 +507,29 @@ export default function PresentMode() {
     startingBlockId,
   ) => {
     const now = new Date().toISOString();
-    const createdRows = [];
 
-    for (let index = 0; index < orderedBlocks.length; index += 1) {
-      const block = orderedBlocks[index];
-      const isCurrent = block.id === startingBlockId;
+    // Cria o progresso dos tópicos em paralelo. Antes cada tópico aguardava
+    // uma requisição terminar para iniciar a próxima, o que deixava a abertura
+    // da apresentação lenta principalmente no celular e em redes móveis.
+    const createdRows = await Promise.all(
+      orderedBlocks.map((block, index) => {
+        const isCurrent = block.id === startingBlockId;
 
-      const row = await base44.entities.SessionBlockProgress.create({
-        session_id: createdSession.id,
-        block_id: block.id,
-        status: isCurrent ? 'current' : 'pending',
-        started_at: isCurrent ? now : '',
-        completed_at: '',
-        elapsed_seconds: 0,
-        visit_count: isCurrent ? 1 : 0,
-        order_used: index,
-        note: '',
-      });
+        return base44.entities.SessionBlockProgress.create({
+          session_id: createdSession.id,
+          block_id: block.id,
+          status: isCurrent ? 'current' : 'pending',
+          started_at: isCurrent ? now : '',
+          completed_at: '',
+          elapsed_seconds: 0,
+          visit_count: isCurrent ? 1 : 0,
+          order_used: index,
+          note: '',
+        });
+      }),
+    );
 
-      createdRows.push(row);
-    }
-
-    return createdRows;
+    return createdRows.filter(Boolean);
   }, []);
 
   const createNewSession = useCallback(async (orderedBlocks) => {
@@ -697,19 +698,24 @@ export default function PresentMode() {
         const existingBlockIds = new Set(savedProgress.map((row) => row.block_id));
         const missingBlocks = ordered.filter((block) => !existingBlockIds.has(block.id));
 
-        for (const block of missingBlocks) {
-          const createdRow = await base44.entities.SessionBlockProgress.create({
-            session_id: activeSession.id,
-            block_id: block.id,
-            status: 'pending',
-            started_at: '',
-            completed_at: '',
-            elapsed_seconds: 0,
-            visit_count: 0,
-            order_used: ordered.findIndex((item) => item.id === block.id),
-            note: '',
-          });
-          savedProgress.push(createdRow);
+        if (missingBlocks.length > 0) {
+          const createdMissingRows = await Promise.all(
+            missingBlocks.map((block) => (
+              base44.entities.SessionBlockProgress.create({
+                session_id: activeSession.id,
+                block_id: block.id,
+                status: 'pending',
+                started_at: '',
+                completed_at: '',
+                elapsed_seconds: 0,
+                visit_count: 0,
+                order_used: ordered.findIndex((item) => item.id === block.id),
+                note: '',
+              })
+            )),
+          );
+
+          savedProgress.push(...createdMissingRows.filter(Boolean));
         }
 
         let currentId = activeSession.current_block_id
@@ -721,39 +727,32 @@ export default function PresentMode() {
 
         const now = new Date().toISOString();
 
-        for (const row of savedProgress) {
+        const progressCorrections = savedProgress.map(async (row) => {
           const shouldBeCurrent = row.block_id === currentId;
 
           if (shouldBeCurrent && row.status !== 'current') {
-            const updated = await base44.entities.SessionBlockProgress.update(
-              row.id,
-              {
-                status: 'current',
-                started_at: row.started_at || now,
-                completed_at: '',
-                visit_count: Math.max(1, asNumber(row.visit_count)),
-              },
-            );
-
-            Object.assign(row, updated || {
+            const fallback = {
               status: 'current',
               started_at: row.started_at || now,
               completed_at: '',
               visit_count: Math.max(1, asNumber(row.visit_count)),
-            });
-          } else if (!shouldBeCurrent && row.status === 'current') {
+            };
             const updated = await base44.entities.SessionBlockProgress.update(
               row.id,
-              {
-                status: 'pending',
-              },
+              fallback,
             );
-
-            Object.assign(row, updated || {
-              status: 'pending',
-            });
+            Object.assign(row, updated || fallback);
+          } else if (!shouldBeCurrent && row.status === 'current') {
+            const fallback = { status: 'pending' };
+            const updated = await base44.entities.SessionBlockProgress.update(
+              row.id,
+              fallback,
+            );
+            Object.assign(row, updated || fallback);
           }
-        }
+        });
+
+        await Promise.all(progressCorrections);
 
         const currentIdFromSession = currentId;
         const index = Math.max(
