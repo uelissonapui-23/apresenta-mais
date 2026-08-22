@@ -26,6 +26,8 @@ const MIGRATED_TABLES = Object.freeze({
   PresentationVersion: 'presentation_versions',
   AppTip: 'app_tips',
   UserProfile: 'profiles',
+  CaptureSession: 'capture_sessions',
+  CaptureNote: 'capture_notes',
 });
 
 const SYSTEM_FIELD_MAP = Object.freeze({

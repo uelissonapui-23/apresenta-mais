@@ -1386,9 +1386,10 @@ export default function PresentMode() {
         </Button>
       </div>
 
-      <main className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto overflow-x-hidden px-5 pb-28 pt-20 sm:px-10 md:px-16 lg:px-24">
+      <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-28 pt-20 sm:px-6 md:px-10 lg:px-12">
+        <div className="mx-auto grid min-h-full w-full max-w-7xl items-center gap-5 lg:grid-cols-[minmax(0,1fr)_300px] xl:gap-7">
         <article
-          className={`mx-auto w-full max-w-5xl ${accessibility.left_aligned_text ? 'text-left' : 'text-center'} ${accessibility.increased_spacing ? 'space-y-3' : ''}`}
+          className={`w-full rounded-[28px] border border-current/10 p-6 shadow-2xl backdrop-blur-sm sm:p-9 lg:p-12 ${darkMode ? 'bg-white/[0.035]' : 'bg-black/[0.025]'} ${accessibility.left_aligned_text ? 'text-left' : 'text-center'} ${accessibility.increased_spacing ? 'space-y-3' : ''}`}
         >
           <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
             <Badge variant="outline" className="border-current/20 bg-transparent text-current">
@@ -1445,6 +1446,29 @@ export default function PresentMode() {
             </div>
           )}
         </article>
+
+        <aside data-no-stage-click className={`hidden self-center rounded-2xl border p-4 shadow-xl lg:block ${panelClasses}`}>
+          <p className="text-[11px] font-bold uppercase tracking-[0.16em] opacity-50">A seguir</p>
+          {nextBlock ? (
+            <>
+              <p className="mt-3 line-clamp-3 text-base font-semibold leading-snug">{nextBlock.title}</p>
+              {nextBlock.summary && <p className="mt-2 line-clamp-4 text-sm leading-relaxed opacity-60">{nextBlock.summary}</p>}
+              <div className="mt-4 flex items-center justify-between border-t border-current/10 pt-3 text-xs opacity-55">
+                <span>{currentIndex + 2} de {visibleBlocks.length}</span>
+                <span>{nextBlock.estimated_duration_seconds > 0 ? formatTime(nextBlock.estimated_duration_seconds) : 'Próximo tópico'}</span>
+              </div>
+            </>
+          ) : (
+            <div className="mt-3 rounded-xl border border-dashed border-current/15 p-4 text-sm opacity-60">Último tópico da apresentação.</div>
+          )}
+          {currentBlock?.presenter_notes && (
+            <Button variant="ghost" className="mt-3 w-full justify-start" onClick={() => setShowNotes(true)}>
+              <Text className="mr-2 h-4 w-4" />
+              Ver minhas notas
+            </Button>
+          )}
+        </aside>
+        </div>
       </main>
 
       {showNotes && currentBlock?.presenter_notes && (
@@ -1472,7 +1496,7 @@ export default function PresentMode() {
       )}
 
       {showNextBlock && nextBlock && showControls && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-[98px] z-20 px-4 text-center">
+        <div className="pointer-events-none absolute inset-x-0 bottom-[98px] z-20 px-4 text-center lg:hidden">
           <p className="truncate text-xs opacity-50">
             Próximo: <span className="font-medium">{nextBlock.title}</span>
           </p>

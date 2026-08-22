@@ -82,6 +82,9 @@ const Templates = lazy(
 const Library = lazy(
   () => import('@/pages/Library'),
 );
+const Capture = lazy(
+  () => import('@/pages/Capture'),
+);
 const ThemesPage = lazy(
   () => import('@/pages/ThemesPage'),
 );
@@ -393,6 +396,11 @@ function AppRoutes() {
             <Route
               path="/library"
               element={<Library />}
+            />
+
+            <Route
+              path="/capture"
+              element={<Capture />}
             />
 
             <Route

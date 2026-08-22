@@ -49,10 +49,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const VIEW_OPTIONS = [
-  { key: 'structure', icon: List, label: 'Estrutura' },
-  { key: 'text', icon: FileText, label: 'Texto' },
-  { key: 'cards', icon: LayoutGrid, label: 'Cartões' },
-  { key: 'script', icon: ScrollText, label: 'Roteiro' },
+  { key: 'structure', icon: List, label: 'Organizar', description: 'Tópicos e níveis' },
+  { key: 'text', icon: FileText, label: 'Escrever', description: 'Texto contínuo' },
+  { key: 'cards', icon: LayoutGrid, label: 'Visualizar', description: 'Cartões de conteúdo' },
+  { key: 'script', icon: ScrollText, label: 'Roteiro', description: 'Preparar sua fala' },
 ];
 
 const DEFAULT_PREFERENCES = {
@@ -1303,7 +1303,7 @@ export default function PresentationEditor() {
           </div>
         </div>
 
-        <div className="flex min-w-0 items-center gap-1 overflow-x-auto px-3 pb-2 sm:px-4">
+        <div className="flex min-w-0 items-stretch gap-2 overflow-x-auto px-3 pb-3 sm:px-5">
           {VIEW_OPTIONS.map((option) => {
             const Icon = option.icon;
             return (
@@ -1311,11 +1311,11 @@ export default function PresentationEditor() {
                 key={option.key}
                 variant={viewMode === option.key ? 'default' : 'ghost'}
                 size="sm"
-                className="h-8 shrink-0 text-xs"
+                className={`h-auto min-w-[138px] shrink-0 justify-start rounded-xl px-3 py-2.5 text-left ${viewMode === option.key ? 'shadow-sm' : 'border border-transparent hover:border-border'}`}
                 onClick={() => handleViewModeChange(option.key)}
               >
-                <Icon className="mr-1 h-3.5 w-3.5" />
-                {option.label}
+                <Icon className="mr-2 h-4 w-4 shrink-0" />
+                <span className="min-w-0"><span className="block text-xs font-semibold">{option.label}</span><span className={`block text-[10px] font-normal ${viewMode === option.key ? 'text-primary-foreground/75' : 'text-muted-foreground'}`}>{option.description}</span></span>
               </Button>
             );
           })}
@@ -1363,42 +1363,13 @@ export default function PresentationEditor() {
         </div>
       </div>
 
-      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-3 py-4 sm:px-5 md:py-6">
-        <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Card className="border-border/70">
-            <CardContent className="p-3">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Blocos
-              </p>
-              <p className="mt-1 text-lg font-bold">{orderedBlocks.length}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-border/70">
-            <CardContent className="p-3">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Visíveis
-              </p>
-              <p className="mt-1 text-lg font-bold">{visibleBlockCount}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-border/70">
-            <CardContent className="p-3">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Essenciais
-              </p>
-              <p className="mt-1 text-lg font-bold">{essentialCount}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-border/70">
-            <CardContent className="p-3">
-              <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Duração
-              </p>
-              <p className="mt-1 text-lg font-bold">
-                {formatDuration(totalDuration)}
-              </p>
-            </CardContent>
-          </Card>
+      <div className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-3 py-5 sm:px-6 md:py-7 lg:px-8">
+        <div className="mb-5 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-2xl border bg-card px-4 py-3 text-sm shadow-sm">
+          <span><strong className="text-foreground">{orderedBlocks.length}</strong> <span className="text-muted-foreground">tópicos</span></span>
+          <span><strong className="text-foreground">{visibleBlockCount}</strong> <span className="text-muted-foreground">visíveis</span></span>
+          <span><strong className="text-foreground">{essentialCount}</strong> <span className="text-muted-foreground">essenciais</span></span>
+          <span className="inline-flex items-center gap-1.5"><Clock3 className="h-4 w-4 text-primary" /><strong className="text-foreground">{formatDuration(totalDuration)}</strong> <span className="text-muted-foreground">estimados</span></span>
+          <span className="ml-auto hidden text-xs text-muted-foreground md:inline">Tudo é salvo automaticamente enquanto você edita.</span>
         </div>
 
         {orderedBlocks.length > 0 && !processing && (
@@ -1427,7 +1398,7 @@ export default function PresentationEditor() {
             />
           </Card>
         ) : (
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-4">
             {viewMode === 'structure' && (
               <ViewStructure
                 blocks={orderedBlocks}

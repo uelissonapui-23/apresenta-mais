@@ -1,0 +1,33 @@
+APRESENTA+ — COLETA + EDITOR + APRESENTADOR V1
+
+1) Extraia este ZIP na raiz do projeto, substituindo os arquivos.
+
+2) Antes de publicar, valide no Windows:
+
+npm run lint
+npm run typecheck
+npm run build
+
+3) Se os três comandos passarem, aplique no Supabase SQL Editor:
+
+supabase/migrations/20260822180000_capture_notes_workflow.sql
+
+4) Depois execute:
+
+VALIDAR-COLETA-APRESENTA-MAIS.sql
+
+Resultado esperado: os quatro campos = true.
+
+5) Teste local/produção antes do commit:
+- Menu > Coleta
+- Criar uma coleta
+- Adicionar notas de tipos diferentes
+- Pesquisar notas
+- Marcar várias notas
+- Transformar em apresentação
+- Abrir o editor e conferir a nova interface
+- Abrir Apresentar e conferir o novo painel “A seguir”
+
+6) Só depois faça git add / commit / push.
+
+Nenhuma tabela existente é alterada ou removida. A migration cria apenas capture_sessions e capture_notes no schema apresenta_mais, ambas com RLS por usuário autenticado.

@@ -14,6 +14,7 @@ import {
 
 import {
   BookOpen,
+  NotebookPen,
   ChevronRight,
   CircleUserRound,
   CreditCard,
@@ -85,6 +86,11 @@ const MAIN_NAV_ITEMS = [
     label: 'Modelos',
     path: '/templates',
     icon: LayoutTemplate,
+  },
+  {
+    label: 'Coleta',
+    path: '/capture',
+    icon: NotebookPen,
   },
   {
     label: 'Biblioteca',
@@ -235,6 +241,10 @@ function getPageTitle(pathname) {
 
   if (pathname === '/new-presentation') {
     return 'Nova apresentação';
+  }
+
+  if (pathname === '/capture') {
+    return 'Coleta';
   }
 
   if (pathname.startsWith('/guided/')) {
