@@ -1369,7 +1369,7 @@ export default function PresentMode() {
   return (
     <div
       ref={stageRef}
-      className={`fixed inset-0 z-[90] flex min-h-[100dvh] select-none flex-col overflow-hidden ${themeClasses} ${motionClass} ${contrastClass}`}
+      className={`fixed inset-0 z-40 flex min-h-[100dvh] select-none flex-col overflow-hidden ${themeClasses} ${motionClass} ${contrastClass}`}
       onClick={handleStageClick}
       onMouseMove={resetControlsTimer}
       onTouchStart={resetControlsTimer}
