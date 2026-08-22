@@ -11,7 +11,8 @@
     "typecheck": "tsc -p ./jsconfig.json",
     "preview": "vite preview",
     "check:migration-foundation": "node scripts/check-migration-foundation.mjs",
-    "check:security": "node scripts/check-security-foundation.mjs"
+    "check:security": "node scripts/check-security-foundation.mjs",
+    "check:release": "npm run lint && npm run typecheck && npm run check:migration-foundation && npm run check:security && node scripts/check-release-readiness.mjs && npm run build"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
