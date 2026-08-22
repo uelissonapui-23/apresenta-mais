@@ -294,6 +294,7 @@ export default function PresentMode() {
   const { user, loading: userLoading } = useCurrentUser();
 
   const stageRef = useRef(null);
+  const scriptListRef = useRef(null);
   const controlTimerRef = useRef(null);
   const elapsedRef = useRef(0);
   const currentIndexRef = useRef(0);
@@ -393,6 +394,16 @@ export default function PresentMode() {
   useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
+
+  useEffect(() => {
+    const currentNode = scriptListRef.current?.querySelector('[data-current-topic="true"]');
+    if (!currentNode) return;
+
+    currentNode.scrollIntoView({
+      behavior: accessibility.reduce_motion ? 'auto' : 'smooth',
+      block: 'center',
+    });
+  }, [accessibility.reduce_motion, currentIndex]);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -1392,123 +1403,133 @@ export default function PresentMode() {
         </div>
       </header>
 
-      <main className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-32 pt-20 sm:px-5 sm:pb-36 sm:pt-24 lg:px-8">
-        <div
-          className={`mx-auto grid min-h-full w-full items-center gap-5 xl:gap-7 ${showNextBlock ? 'max-w-[1500px] xl:grid-cols-[minmax(0,1fr)_320px]' : 'max-w-6xl'}`}
-        >
-          <article
-            className={`relative w-full overflow-hidden rounded-[30px] border border-current/10 px-5 py-7 shadow-[0_24px_80px_rgba(15,23,42,0.14)] sm:px-8 sm:py-10 lg:px-12 lg:py-14 ${darkMode ? 'bg-white/[0.035]' : 'bg-black/[0.018]'} ${accessibility.left_aligned_text ? 'text-left' : 'text-center'}`}
-          >
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-current/[0.025] to-transparent" />
-
-            <div className={`relative mx-auto flex max-w-5xl flex-col ${accessibility.increased_spacing ? 'gap-4' : ''}`}>
-              <div className={`mb-6 flex flex-wrap items-center gap-2 ${accessibility.left_aligned_text ? 'justify-start' : 'justify-center'}`}>
-                <Badge variant="outline" className="border-current/15 bg-transparent text-current">
-                  {currentIndex + 1} de {visibleBlocks.length}
-                </Badge>
-                {currentBlock?.is_essential && (
-                  <Badge className="bg-amber-500 text-white hover:bg-amber-500">
-                    <Flag className="mr-1 h-3 w-3" />
-                    Ponto essencial
-                  </Badge>
-                )}
-                {!running && (
-                  <Badge className="sm:hidden bg-amber-500 text-white hover:bg-amber-500">
-                    Pausada
-                  </Badge>
-                )}
-              </div>
-
-              <h1
-                className="break-words font-bold leading-[1.06] tracking-[-0.025em]"
-                style={{ fontSize: `${fontSize + 10}px` }}
-              >
-                {currentBlock?.title}
-              </h1>
-
-              {detailValue >= 2 && currentBlock?.summary && (
-                <p
-                  className={`mt-6 whitespace-pre-wrap leading-relaxed ${mutedClasses}`}
-                  style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 3)}px` }}
-                >
-                  {currentBlock.summary}
+      <main
+        ref={scriptListRef}
+        className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-32 pt-20 sm:px-5 sm:pb-36 sm:pt-24 lg:px-8"
+      >
+        <div className="mx-auto w-full max-w-5xl py-4 sm:py-7">
+          <div className={`mb-4 rounded-2xl border px-4 py-3 shadow-sm ${panelClasses}`}>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-bold uppercase tracking-[0.15em] opacity-45">Roteiro ao vivo</p>
+                <p className="mt-0.5 truncate text-sm font-semibold sm:text-base">
+                  Acompanhe o fluxo inteiro sem perder o ponto atual.
                 </p>
-              )}
-
-              {detailValue >= 3 && currentBlock?.content && (
-                <div
-                  className="mt-7 whitespace-pre-wrap leading-[1.68]"
-                  style={{ fontSize: `${fontSize}px` }}
-                >
-                  {currentBlock.content}
-                </div>
-              )}
-
-              {detailValue >= 4 && showAdditional && currentBlock?.additional_content && (
-                <div
-                  className={`mt-8 whitespace-pre-wrap rounded-2xl border border-current/10 p-5 text-left leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.025]'}`}
-                  style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
-                >
-                  {currentBlock.additional_content}
-                </div>
-              )}
-
-              {currentBlock?.id && (
-                <div className="mt-8 text-left">
-                  <BlockAttachmentsDisplay blockId={currentBlock.id} darkMode={darkMode} />
-                </div>
-              )}
-
-              <div className={`mt-9 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-current/10 pt-5 text-xs opacity-55 ${accessibility.left_aligned_text ? 'justify-start' : 'justify-center'}`}>
-                <span>{progressPercent}% concluído</span>
-                <span>{completedCount} apresentados</span>
-                {currentBlock?.estimated_duration_seconds > 0 && (
-                  <span>Tempo deste tópico: {formatTime(currentBlock.estimated_duration_seconds)}</span>
-                )}
+              </div>
+              <div className="flex items-center gap-2 text-xs opacity-60">
+                <span>{currentIndex + 1} de {visibleBlocks.length}</span>
+                {showTimer && <span className="font-mono">{formatTime(elapsed)}</span>}
               </div>
             </div>
-          </article>
+          </div>
 
-          {showNextBlock && (
-            <aside data-no-stage-click className={`hidden self-center overflow-hidden rounded-[24px] border shadow-xl xl:block ${panelClasses}`}>
-              <div className={`border-b border-current/10 px-5 py-4 ${darkMode ? 'bg-white/[0.035]' : 'bg-black/[0.025]'}`}>
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] opacity-45">A seguir</p>
-              </div>
+          <div className="space-y-2.5 sm:space-y-3">
+            {visibleBlocks.map((block, index) => {
+              const row = progressMap.get(block.id);
+              const meta = statusMeta(row?.status || (index === currentIndex ? 'current' : 'pending'));
+              const StatusIcon = meta.icon;
+              const isCurrent = index === currentIndex;
+              const wasCompleted = row?.status === 'completed';
+              const blockSummary = block.summary || block.content || '';
 
-              <div className="p-5">
-                {nextBlock ? (
-                  <>
-                    <p className="line-clamp-4 text-lg font-semibold leading-snug">{nextBlock.title}</p>
-                    {nextBlock.summary && (
-                      <p className="mt-3 line-clamp-5 text-sm leading-relaxed opacity-60">{nextBlock.summary}</p>
-                    )}
-                    <div className="mt-5 flex items-center justify-between border-t border-current/10 pt-4 text-xs opacity-55">
-                      <span>{currentIndex + 2} de {visibleBlocks.length}</span>
-                      <span>{nextBlock.estimated_duration_seconds > 0 ? formatTime(nextBlock.estimated_duration_seconds) : 'Próximo tópico'}</span>
+              return (
+                <button
+                  key={block.id}
+                  type="button"
+                  data-no-stage-click
+                  data-current-topic={isCurrent ? 'true' : 'false'}
+                  onClick={() => {
+                    if (!isCurrent) activateIndex(index);
+                    resetControlsTimer();
+                  }}
+                  className={`group w-full overflow-hidden rounded-[22px] border text-left transition-all ${
+                    isCurrent
+                      ? darkMode
+                        ? 'border-blue-400/70 bg-blue-500/10 shadow-[0_18px_55px_rgba(37,99,235,0.18)] ring-1 ring-blue-400/30'
+                        : 'border-blue-500/55 bg-blue-50 shadow-[0_18px_55px_rgba(37,99,235,0.12)] ring-1 ring-blue-500/20'
+                      : darkMode
+                        ? 'border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.045]'
+                        : 'border-black/10 bg-white hover:border-black/20 hover:bg-slate-50'
+                  } ${wasCompleted && !isCurrent ? 'opacity-58' : ''}`}
+                  style={{ marginLeft: `${Math.min(block.visualDepth || 0, 3) * 10}px`, width: `calc(100% - ${Math.min(block.visualDepth || 0, 3) * 10}px)` }}
+                >
+                  <div className="flex items-start gap-3 p-4 sm:gap-4 sm:p-5">
+                    <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold ${meta.className}`}>
+                      {StatusIcon ? <StatusIcon className="h-4 w-4" /> : index + 1}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isCurrent && (
+                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">Agora</Badge>
+                        )}
+                        {block.is_essential && (
+                          <Badge className="bg-amber-500 text-white hover:bg-amber-500">
+                            <Flag className="mr-1 h-3 w-3" /> Essencial
+                          </Badge>
+                        )}
+                        <span className="ml-auto flex items-center gap-1 text-[11px] opacity-50">
+                          {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : 'Sem tempo definido'}
+                        </span>
+                      </div>
+
+                      <h2
+                        className={`mt-2 break-words font-bold leading-tight ${isCurrent ? 'text-xl sm:text-2xl' : 'text-base sm:text-lg'}`}
+                        style={isCurrent ? { fontSize: `${Math.max(22, fontSize - 2)}px` } : undefined}
+                      >
+                        {block.title}
+                      </h2>
+
+                      {blockSummary && (
+                        <p
+                          className={`mt-2 whitespace-pre-wrap leading-relaxed ${isCurrent ? mutedClasses : 'opacity-58'} ${isCurrent ? '' : 'line-clamp-3'}`}
+                          style={{ fontSize: `${isCurrent ? Math.max(MIN_FONT_SIZE, fontSize - 7) : 14}px` }}
+                        >
+                          {blockSummary}
+                        </p>
+                      )}
+
+                      {isCurrent && detailValue >= 3 && block.content && block.content !== block.summary && (
+                        <div
+                          className="mt-4 whitespace-pre-wrap border-t border-current/10 pt-4 leading-[1.65]"
+                          style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
+                        >
+                          {block.content}
+                        </div>
+                      )}
+
+                      {isCurrent && detailValue >= 4 && showAdditional && block.additional_content && (
+                        <div
+                          className={`mt-4 whitespace-pre-wrap rounded-2xl border border-current/10 p-4 leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.025]'}`}
+                          style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 7)}px` }}
+                        >
+                          {block.additional_content}
+                        </div>
+                      )}
+
+                      {isCurrent && block.id && (
+                        <div className="mt-4" onClick={(event) => event.stopPropagation()}>
+                          <BlockAttachmentsDisplay blockId={block.id} darkMode={darkMode} />
+                        </div>
+                      )}
+
+                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] opacity-48">
+                        <span>{meta.label}</span>
+                        <span>Tópico {index + 1}</span>
+                        {isCurrent && <span>{progressPercent}% da apresentação concluída</span>}
+                      </div>
                     </div>
-                  </>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-current/15 p-4 text-sm opacity-60">
-                    Este é o último tópico da apresentação.
                   </div>
-                )}
+                </button>
+              );
+            })}
+          </div>
 
-                {currentBlock?.presenter_notes && (
-                  <Button
-                    variant="outline"
-                    className="mt-4 w-full justify-start gap-2"
-                    onClick={() => setShowNotes(true)}
-                  >
-                    <Text className="h-4 w-4" />
-                    Abrir minhas notas
-                  </Button>
-                )}
-              </div>
-            </aside>
-          )}
+          <div className="mt-5 rounded-2xl border border-dashed border-current/15 p-4 text-center text-xs opacity-50">
+            Toque em qualquer tópico para ir diretamente até ele. O tópico atual permanece destacado enquanto você apresenta.
+          </div>
         </div>
       </main>
-
       {showNotes && currentBlock?.presenter_notes && (
         <aside
           data-no-stage-click

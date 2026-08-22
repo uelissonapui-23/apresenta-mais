@@ -32,7 +32,7 @@ import useCurrentUser from '@/hooks/useCurrentUser';
 import AutosaveIndicator from '@/components/shared/AutosaveIndicator';
 import DetailLevelControl from '@/components/shared/DetailLevelControl';
 import BlockTypeSelector from '@/components/editor/BlockTypeSelector';
-import ViewStructure from '@/components/editor/ViewStructure';
+import ViewHybrid from '@/components/editor/ViewHybrid';
 import ViewText from '@/components/editor/ViewText';
 import ViewCards from '@/components/editor/ViewCards';
 import ViewScript from '@/components/editor/ViewScript';
@@ -51,10 +51,10 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 const VIEW_OPTIONS = [
-  { key: 'structure', icon: List, label: 'Organizar', description: 'Monte a ordem e a hierarquia dos tópicos.' },
+  { key: 'structure', icon: List, label: 'Construtor', description: 'Leia o roteiro inteiro e edite somente o tópico que abrir.' },
   { key: 'text', icon: FileText, label: 'Escrever', description: 'Concentre-se no texto corrido da apresentação.' },
   { key: 'cards', icon: LayoutGrid, label: 'Visualizar', description: 'Veja cada tópico como um cartão independente.' },
-  { key: 'script', icon: ScrollText, label: 'Roteiro', description: 'Leia o fluxo como você pretende apresentar.' },
+  { key: 'script', icon: ScrollText, label: 'Roteiro', description: 'Confira a sequência completa sem campos de edição.' },
 ];
 
 const DEFAULT_PREFERENCES = {
@@ -1429,7 +1429,7 @@ export default function PresentationEditor() {
             {orderedBlocks.length > 0 && !processing && viewMode === 'structure' && (
               <div className="mb-4 flex items-start gap-2 rounded-xl border border-dashed bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
                 <LayoutGrid className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>Arraste pelo ícone de pontos para reorganizar. A ordem é salva automaticamente.</span>
+                <span>Veja a apresentação como roteiro. Toque em um tópico para editar só ele; arraste pelos pontos para reorganizar.</span>
               </div>
             )}
 
@@ -1455,15 +1455,13 @@ export default function PresentationEditor() {
             ) : (
               <div className="min-w-0">
                 {viewMode === 'structure' && (
-                  <ViewStructure
+                  <ViewHybrid
                     blocks={orderedBlocks}
                     blockTypes={blockTypes}
                     detailLevel={detailLevel}
                     onUpdate={handleUpdateBlock}
                     onDelete={openDeleteDialog}
                     onDuplicate={handleDuplicate}
-                    onMoveUp={handleMoveUp}
-                    onMoveDown={handleMoveDown}
                     onIndent={handleIndent}
                     onOutdent={handleOutdent}
                     onAddChild={handleAddChild}
