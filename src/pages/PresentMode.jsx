@@ -225,7 +225,7 @@ function statusMeta(status) {
   switch (status) {
     case 'completed':
       return {
-        label: 'Apresentado',
+        label: 'Lido',
         className: 'bg-emerald-500 text-white border-emerald-500',
         icon: Check,
       };
@@ -363,7 +363,7 @@ export default function PresentMode() {
   );
 
   const completedCount = useMemo(
-    () => progressRows.filter((row) => row.status === 'completed').length,
+    () => progressRows.filter((row) => row.status === 'completed' || Boolean(row.completed_at)).length,
     [progressRows],
   );
 
@@ -454,7 +454,7 @@ export default function PresentMode() {
 
     const current = visibleBlocks[currentIndexRef.current];
     const rows = Array.from(progressRef.current.values());
-    const completed = rows.filter((row) => row.status === 'completed').length;
+    const completed = rows.filter((row) => row.status === 'completed' || Boolean(row.completed_at)).length;
     const skipped = rows.filter((row) => row.status === 'skipped').length;
 
     try {
@@ -944,7 +944,7 @@ export default function PresentMode() {
     const newProgress = progressRef.current.get(newBlock.id);
     await updateProgressStatus(newBlock.id, 'current', {
       started_at: now,
-      completed_at: '',
+      completed_at: newProgress?.completed_at || '',
       visit_count: asNumber(newProgress?.visit_count) + 1,
     });
 
@@ -1011,6 +1011,26 @@ export default function PresentMode() {
       setEndDialogOpen(true);
     }
   }, [activateIndex, currentBlock, updateProgressStatus, visibleBlocks.length]);
+
+  const toggleRead = useCallback(async (block) => {
+    if (!block?.id) return;
+
+    const row = progressRef.current.get(block.id);
+    if (!row?.id) return;
+
+    const isRead = row.status === 'completed' || Boolean(row.completed_at);
+    const isCurrentBlock = block.id === currentBlock?.id;
+
+    await updateProgressStatus(
+      block.id,
+      isCurrentBlock ? 'current' : (isRead ? 'pending' : 'completed'),
+      {
+        completed_at: isRead ? '' : new Date().toISOString(),
+      },
+    );
+
+    resetControlsTimer();
+  }, [currentBlock?.id, resetControlsTimer, updateProgressStatus]);
 
   const togglePause = useCallback(async () => {
     if (operationRef.current) return;
@@ -1442,7 +1462,8 @@ export default function PresentMode() {
                     const row = progressMap.get(block.id);
                     const meta = statusMeta(row?.status || (index === currentIndex ? 'current' : 'pending'));
                     const isCurrent = index === currentIndex;
-                    const isPast = row?.status === 'completed' && !isCurrent;
+                    const isRead = row?.status === 'completed' || Boolean(row?.completed_at);
+                    const isPast = isRead && !isCurrent;
                     const blockSummary = block.summary || '';
                     const primaryText = block.content || blockSummary;
 
@@ -1473,14 +1494,34 @@ export default function PresentMode() {
                             {String(index + 1).padStart(2, '0')}
                           </span>
                           {isCurrent && <Badge className="bg-blue-600 text-white hover:bg-blue-600">Agora</Badge>}
+                          {isRead && (
+                            <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/12 text-emerald-600 hover:bg-emerald-500/12 dark:text-emerald-300">
+                              <Check className="h-3 w-3" /> Lido
+                            </Badge>
+                          )}
                           {block.is_essential && (
                             <Badge className="bg-amber-500 text-white hover:bg-amber-500">
                               <Flag className="mr-1 h-3 w-3" /> Essencial
                             </Badge>
                           )}
-                          <span className="ml-auto opacity-40">
-                            {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : ''}
-                          </span>
+                          <div className="ml-auto flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => toggleRead(block)}
+                              className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${
+                                isRead
+                                  ? 'border-emerald-500/35 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
+                                  : 'border-current/15 bg-transparent opacity-55 hover:opacity-100'
+                              }`}
+                              aria-label={isRead ? `Marcar ${block.title} como não lido` : `Marcar ${block.title} como lido`}
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              {isRead ? 'Lido' : 'Marcar lido'}
+                            </button>
+                            <span className="opacity-40">
+                              {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : ''}
+                            </span>
+                          </div>
                         </div>
 
                         <h2
@@ -1536,18 +1577,27 @@ export default function PresentMode() {
                 const meta = statusMeta(row?.status || (index === currentIndex ? 'current' : 'pending'));
                 const StatusIcon = meta.icon;
                 const isCurrent = index === currentIndex;
-                const wasCompleted = row?.status === 'completed';
+                const isRead = row?.status === 'completed' || Boolean(row?.completed_at);
+                const wasCompleted = isRead;
                 const blockSummary = block.summary || block.content || '';
 
                 return (
-                  <button
+                  <div
                     key={block.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     data-no-stage-click
                     data-current-topic={isCurrent ? 'true' : 'false'}
                     onClick={() => {
                       if (!isCurrent) activateIndex(index);
                       resetControlsTimer();
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        if (!isCurrent) activateIndex(index);
+                        resetControlsTimer();
+                      }
                     }}
                     className={`group w-full overflow-hidden rounded-[22px] border text-left transition-all ${
                       isCurrent
@@ -1568,14 +1618,33 @@ export default function PresentMode() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           {isCurrent && <Badge className="bg-blue-600 text-white hover:bg-blue-600">Agora</Badge>}
+                          {isRead && (
+                            <Badge className="gap-1 border-emerald-500/30 bg-emerald-500/12 text-emerald-600 hover:bg-emerald-500/12 dark:text-emerald-300">
+                              <Check className="h-3 w-3" /> Lido
+                            </Badge>
+                          )}
                           {block.is_essential && (
                             <Badge className="bg-amber-500 text-white hover:bg-amber-500">
                               <Flag className="mr-1 h-3 w-3" /> Essencial
                             </Badge>
                           )}
-                          <span className="ml-auto text-[11px] opacity-50">
-                            {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : 'Sem tempo definido'}
-                          </span>
+                          <div className="ml-auto flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => toggleRead(block)}
+                              className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold transition-colors ${
+                                isRead
+                                  ? 'border-emerald-500/35 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300'
+                                  : 'border-current/15 bg-transparent opacity-55 hover:opacity-100'
+                              }`}
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              {isRead ? 'Lido' : 'Marcar lido'}
+                            </button>
+                            <span className="text-[11px] opacity-50">
+                              {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : 'Sem tempo definido'}
+                            </span>
+                          </div>
                         </div>
 
                         <h2
@@ -1619,14 +1688,14 @@ export default function PresentMode() {
                         )}
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
           )}
 
           <div className="mt-5 rounded-2xl border border-dashed border-current/15 p-4 text-center text-xs opacity-50">
-            Toque em qualquer tópico para ir diretamente até ele. O tópico atual acompanha você durante a apresentação.
+            Toque em qualquer tópico para ir diretamente até ele. Use “Marcar lido” para registrar o que já foi apresentado e evitar repetições quando seguir uma ordem livre.
           </div>
         </div>
       </main>
@@ -1713,6 +1782,17 @@ export default function PresentMode() {
                 <span>{running ? 'Pausar' : 'Continuar'}</span>
               </Button>
 
+              <Button
+                variant={(progressMap.get(currentBlock?.id)?.status === 'completed' || Boolean(progressMap.get(currentBlock?.id)?.completed_at)) ? 'secondary' : 'ghost'}
+                onClick={() => toggleRead(currentBlock)}
+                className={`gap-2 px-3 ${controlSizeClass}`}
+                aria-label={(progressMap.get(currentBlock?.id)?.status === 'completed' || Boolean(progressMap.get(currentBlock?.id)?.completed_at)) ? 'Desmarcar tópico como lido' : 'Marcar tópico como lido'}
+                title="Use em apresentação livre para não repetir conteúdo"
+              >
+                <Check className="h-5 w-5" />
+                <span className="hidden lg:inline">{(progressMap.get(currentBlock?.id)?.status === 'completed' || Boolean(progressMap.get(currentBlock?.id)?.completed_at)) ? 'Lido' : 'Marcar lido'}</span>
+              </Button>
+
               {currentBlock?.presenter_notes && (
                 <Button
                   variant={showNotes ? 'secondary' : 'ghost'}
@@ -1734,7 +1814,7 @@ export default function PresentMode() {
                 <DropdownMenuContent align="center" className="w-56">
                   <DropdownMenuItem onClick={() => markCurrent('completed')}>
                     <Check className="mr-2 h-4 w-4 text-emerald-500" />
-                    Marcar como apresentado
+                    Marcar como lido e avançar
                   </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => markCurrent('revisit')}>
                     <RotateCcw className="mr-2 h-4 w-4 text-amber-500" />
@@ -1779,7 +1859,7 @@ export default function PresentMode() {
           </div>
 
           <div className="mt-2 flex items-center justify-center gap-3 border-t border-current/10 px-2 pt-2 text-[11px] opacity-50 sm:justify-between">
-            <span className="hidden sm:inline">{completedCount} apresentados</span>
+            <span className="hidden sm:inline">{completedCount} lidos</span>
             <span>{progressPercent}% concluído</span>
             <span className="hidden sm:inline">Plano: {formatTime(plannedSeconds)}</span>
           </div>
