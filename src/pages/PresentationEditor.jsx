@@ -17,6 +17,7 @@ import {
   LayoutGrid,
   List,
   Loader2,
+  Monitor,
   Play,
   Plus,
   RefreshCw,
@@ -1249,7 +1250,7 @@ export default function PresentationEditor() {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] min-w-0 flex-col overflow-x-hidden bg-muted/10">
       <div className="sticky top-0 z-30 border-b border-border/80 bg-background/95 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/85">
-        <div className="mx-auto flex w-full max-w-7xl min-w-0 items-center justify-between gap-3 px-3 py-3 sm:px-5 lg:px-8">
+        <div className="mx-auto flex w-full max-w-7xl min-w-0 flex-col items-stretch gap-3 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <Button asChild variant="outline" size="icon" className="h-10 w-10 shrink-0 rounded-xl">
               <Link to="/presentations" aria-label="Voltar às apresentações">
@@ -1270,7 +1271,7 @@ export default function PresentationEditor() {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="grid w-full shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 sm:flex sm:w-auto">
             <Button
               variant="outline"
               size="sm"
@@ -1288,10 +1289,17 @@ export default function PresentationEditor() {
               </Link>
             </Button>
 
-            <Button asChild size="sm" className="h-10 rounded-xl px-4 shadow-sm">
+            <Button asChild variant="outline" size="sm" className="h-10 min-w-0 rounded-xl px-3 sm:px-4">
               <Link to={`/rehearsal/${id}`}>
-                <Play className="mr-2 h-4 w-4" />
-                Ensaiar
+                <Play className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">Ensaiar</span>
+              </Link>
+            </Button>
+
+            <Button asChild size="sm" className="h-10 min-w-0 rounded-xl px-3 shadow-sm sm:px-4">
+              <Link to={`/present/${id}`}>
+                <Monitor className="mr-2 h-4 w-4 shrink-0" />
+                <span className="truncate">Apresentar agora</span>
               </Link>
             </Button>
 

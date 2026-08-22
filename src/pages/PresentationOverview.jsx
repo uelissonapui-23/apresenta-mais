@@ -981,7 +981,7 @@ export default function PresentationOverview() {
           <Button asChild>
             <Link to={`/present/${presentation.id}`}>
               <Monitor className="mr-2 h-4 w-4" />
-              Apresentar
+              Apresentar agora
             </Link>
           </Button>
         </div>
