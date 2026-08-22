@@ -8,6 +8,7 @@ import React, {
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
+  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -334,6 +335,7 @@ export default function PresentMode() {
     increased_spacing: false,
   });
   const [showNotes, setShowNotes] = useState(false);
+  const [presentationView, setPresentationView] = useState('book');
   const [showAdditional, setShowAdditional] = useState(true);
   const [showTopicSheet, setShowTopicSheet] = useState(false);
   const [showSettingsSheet, setShowSettingsSheet] = useState(false);
@@ -1407,13 +1409,17 @@ export default function PresentMode() {
         ref={scriptListRef}
         className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-32 pt-20 sm:px-5 sm:pb-36 sm:pt-24 lg:px-8"
       >
-        <div className="mx-auto w-full max-w-5xl py-4 sm:py-7">
+        <div className={`mx-auto w-full py-4 sm:py-7 ${presentationView === 'book' ? 'max-w-4xl' : 'max-w-5xl'}`}>
           <div className={`mb-4 rounded-2xl border px-4 py-3 shadow-sm ${panelClasses}`}>
             <div className="flex flex-wrap items-center gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] opacity-45">Roteiro ao vivo</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.15em] opacity-45">
+                  {presentationView === 'book' ? 'Leitura contínua' : 'Roteiro ao vivo'}
+                </p>
                 <p className="mt-0.5 truncate text-sm font-semibold sm:text-base">
-                  Acompanhe o fluxo inteiro sem perder o ponto atual.
+                  {presentationView === 'book'
+                    ? 'Leia como um livro e avance naturalmente pelos tópicos.'
+                    : 'Acompanhe o fluxo inteiro sem perder o ponto atual.'}
                 </p>
               </div>
               <div className="flex items-center gap-2 text-xs opacity-60">
@@ -1423,110 +1429,204 @@ export default function PresentMode() {
             </div>
           </div>
 
-          <div className="space-y-2.5 sm:space-y-3">
-            {visibleBlocks.map((block, index) => {
-              const row = progressMap.get(block.id);
-              const meta = statusMeta(row?.status || (index === currentIndex ? 'current' : 'pending'));
-              const StatusIcon = meta.icon;
-              const isCurrent = index === currentIndex;
-              const wasCompleted = row?.status === 'completed';
-              const blockSummary = block.summary || block.content || '';
+          {presentationView === 'book' ? (
+            <article className={`overflow-hidden rounded-[26px] border shadow-xl ${darkMode ? 'border-white/10 bg-slate-900/55' : 'border-black/10 bg-white'}`}>
+              <div className="px-5 py-6 sm:px-8 sm:py-9 md:px-10">
+                <div className="mb-8 border-b border-current/10 pb-5 text-center">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.18em] opacity-45">{presentation?.title || 'Apresentação'}</p>
+                  <p className="mt-2 text-xs opacity-50">Toque em um trecho para torná-lo o tópico atual.</p>
+                </div>
 
-              return (
-                <button
-                  key={block.id}
-                  type="button"
-                  data-no-stage-click
-                  data-current-topic={isCurrent ? 'true' : 'false'}
-                  onClick={() => {
-                    if (!isCurrent) activateIndex(index);
-                    resetControlsTimer();
-                  }}
-                  className={`group w-full overflow-hidden rounded-[22px] border text-left transition-all ${
-                    isCurrent
-                      ? darkMode
-                        ? 'border-blue-400/70 bg-blue-500/10 shadow-[0_18px_55px_rgba(37,99,235,0.18)] ring-1 ring-blue-400/30'
-                        : 'border-blue-500/55 bg-blue-50 shadow-[0_18px_55px_rgba(37,99,235,0.12)] ring-1 ring-blue-500/20'
-                      : darkMode
-                        ? 'border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.045]'
-                        : 'border-black/10 bg-white hover:border-black/20 hover:bg-slate-50'
-                  } ${wasCompleted && !isCurrent ? 'opacity-58' : ''}`}
-                  style={{ marginLeft: `${Math.min(block.visualDepth || 0, 3) * 10}px`, width: `calc(100% - ${Math.min(block.visualDepth || 0, 3) * 10}px)` }}
-                >
-                  <div className="flex items-start gap-3 p-4 sm:gap-4 sm:p-5">
-                    <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold ${meta.className}`}>
-                      {StatusIcon ? <StatusIcon className="h-4 w-4" /> : index + 1}
-                    </span>
+                <div className="space-y-1">
+                  {visibleBlocks.map((block, index) => {
+                    const row = progressMap.get(block.id);
+                    const meta = statusMeta(row?.status || (index === currentIndex ? 'current' : 'pending'));
+                    const isCurrent = index === currentIndex;
+                    const isPast = row?.status === 'completed' && !isCurrent;
+                    const blockSummary = block.summary || '';
+                    const primaryText = block.content || blockSummary;
 
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        {isCurrent && (
-                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">Agora</Badge>
-                        )}
-                        {block.is_essential && (
-                          <Badge className="bg-amber-500 text-white hover:bg-amber-500">
-                            <Flag className="mr-1 h-3 w-3" /> Essencial
-                          </Badge>
-                        )}
-                        <span className="ml-auto flex items-center gap-1 text-[11px] opacity-50">
-                          {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : 'Sem tempo definido'}
-                        </span>
-                      </div>
-
-                      <h2
-                        className={`mt-2 break-words font-bold leading-tight ${isCurrent ? 'text-xl sm:text-2xl' : 'text-base sm:text-lg'}`}
-                        style={isCurrent ? { fontSize: `${Math.max(22, fontSize - 2)}px` } : undefined}
+                    return (
+                      <section
+                        key={block.id}
+                        data-no-stage-click
+                        data-current-topic={isCurrent ? 'true' : 'false'}
+                        onClick={() => {
+                          if (!isCurrent) activateIndex(index);
+                          resetControlsTimer();
+                        }}
+                        className={`relative cursor-pointer rounded-2xl px-1 py-5 transition-all sm:px-3 sm:py-7 ${
+                          isCurrent
+                            ? darkMode
+                              ? 'bg-blue-500/10'
+                              : 'bg-blue-50/80'
+                            : 'hover:bg-current/[0.025]'
+                        } ${isPast ? 'opacity-45' : ''}`}
+                        style={{ paddingLeft: `${16 + Math.min(block.visualDepth || 0, 3) * 14}px` }}
                       >
-                        {block.title}
-                      </h2>
+                        {isCurrent && (
+                          <span className="absolute bottom-4 left-0 top-4 w-1 rounded-full bg-blue-500" aria-hidden="true" />
+                        )}
 
-                      {blockSummary && (
-                        <p
-                          className={`mt-2 whitespace-pre-wrap leading-relaxed ${isCurrent ? mutedClasses : 'opacity-58'} ${isCurrent ? '' : 'line-clamp-3'}`}
-                          style={{ fontSize: `${isCurrent ? Math.max(MIN_FONT_SIZE, fontSize - 7) : 14}px` }}
-                        >
-                          {blockSummary}
-                        </p>
-                      )}
-
-                      {isCurrent && detailValue >= 3 && block.content && block.content !== block.summary && (
-                        <div
-                          className="mt-4 whitespace-pre-wrap border-t border-current/10 pt-4 leading-[1.65]"
-                          style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
-                        >
-                          {block.content}
+                        <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px]">
+                          <span className={`font-bold ${isCurrent ? 'text-blue-500' : 'opacity-40'}`}>
+                            {String(index + 1).padStart(2, '0')}
+                          </span>
+                          {isCurrent && <Badge className="bg-blue-600 text-white hover:bg-blue-600">Agora</Badge>}
+                          {block.is_essential && (
+                            <Badge className="bg-amber-500 text-white hover:bg-amber-500">
+                              <Flag className="mr-1 h-3 w-3" /> Essencial
+                            </Badge>
+                          )}
+                          <span className="ml-auto opacity-40">
+                            {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : ''}
+                          </span>
                         </div>
-                      )}
 
-                      {isCurrent && detailValue >= 4 && showAdditional && block.additional_content && (
-                        <div
-                          className={`mt-4 whitespace-pre-wrap rounded-2xl border border-current/10 p-4 leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.025]'}`}
-                          style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 7)}px` }}
+                        <h2
+                          className={`break-words font-bold leading-tight ${isCurrent ? 'text-2xl sm:text-3xl' : 'text-lg sm:text-xl'}`}
+                          style={isCurrent ? { fontSize: `${Math.max(24, fontSize - 1)}px` } : undefined}
                         >
-                          {block.additional_content}
-                        </div>
-                      )}
+                          {block.title}
+                        </h2>
 
-                      {isCurrent && block.id && (
-                        <div className="mt-4" onClick={(event) => event.stopPropagation()}>
-                          <BlockAttachmentsDisplay blockId={block.id} darkMode={darkMode} />
-                        </div>
-                      )}
+                        {blockSummary && blockSummary !== primaryText && (
+                          <p
+                            className={`mt-2 whitespace-pre-wrap leading-relaxed ${isCurrent ? mutedClasses : 'opacity-60'}`}
+                            style={{ fontSize: `${isCurrent ? Math.max(MIN_FONT_SIZE, fontSize - 8) : 14}px` }}
+                          >
+                            {blockSummary}
+                          </p>
+                        )}
 
-                      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] opacity-48">
-                        <span>{meta.label}</span>
-                        <span>Tópico {index + 1}</span>
-                        {isCurrent && <span>{progressPercent}% da apresentação concluída</span>}
+                        {primaryText && (
+                          <div
+                            className={`mt-3 whitespace-pre-wrap leading-[1.75] ${isCurrent ? '' : 'opacity-72'}`}
+                            style={{ fontSize: `${isCurrent ? Math.max(MIN_FONT_SIZE, fontSize - 5) : Math.max(15, fontSize - 11)}px` }}
+                          >
+                            {primaryText}
+                          </div>
+                        )}
+
+                        {isCurrent && detailValue >= 4 && showAdditional && block.additional_content && (
+                          <div className={`mt-4 whitespace-pre-wrap rounded-xl border border-current/10 p-4 leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.025]'}`}>
+                            {block.additional_content}
+                          </div>
+                        )}
+
+                        {isCurrent && block.id && (
+                          <div className="mt-4" onClick={(event) => event.stopPropagation()}>
+                            <BlockAttachmentsDisplay blockId={block.id} darkMode={darkMode} />
+                          </div>
+                        )}
+
+                        {index < visibleBlocks.length - 1 && (
+                          <div className="mt-6 border-b border-current/10" aria-hidden="true" />
+                        )}
+                      </section>
+                    );
+                  })}
+                </div>
+              </div>
+            </article>
+          ) : (
+            <div className="space-y-2.5 sm:space-y-3">
+              {visibleBlocks.map((block, index) => {
+                const row = progressMap.get(block.id);
+                const meta = statusMeta(row?.status || (index === currentIndex ? 'current' : 'pending'));
+                const StatusIcon = meta.icon;
+                const isCurrent = index === currentIndex;
+                const wasCompleted = row?.status === 'completed';
+                const blockSummary = block.summary || block.content || '';
+
+                return (
+                  <button
+                    key={block.id}
+                    type="button"
+                    data-no-stage-click
+                    data-current-topic={isCurrent ? 'true' : 'false'}
+                    onClick={() => {
+                      if (!isCurrent) activateIndex(index);
+                      resetControlsTimer();
+                    }}
+                    className={`group w-full overflow-hidden rounded-[22px] border text-left transition-all ${
+                      isCurrent
+                        ? darkMode
+                          ? 'border-blue-400/70 bg-blue-500/10 shadow-[0_18px_55px_rgba(37,99,235,0.18)] ring-1 ring-blue-400/30'
+                          : 'border-blue-500/55 bg-blue-50 shadow-[0_18px_55px_rgba(37,99,235,0.12)] ring-1 ring-blue-500/20'
+                        : darkMode
+                          ? 'border-white/10 bg-white/[0.025] hover:border-white/20 hover:bg-white/[0.045]'
+                          : 'border-black/10 bg-white hover:border-black/20 hover:bg-slate-50'
+                    } ${wasCompleted && !isCurrent ? 'opacity-58' : ''}`}
+                    style={{ marginLeft: `${Math.min(block.visualDepth || 0, 3) * 10}px`, width: `calc(100% - ${Math.min(block.visualDepth || 0, 3) * 10}px)` }}
+                  >
+                    <div className="flex items-start gap-3 p-4 sm:gap-4 sm:p-5">
+                      <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-xs font-bold ${meta.className}`}>
+                        {StatusIcon ? <StatusIcon className="h-4 w-4" /> : index + 1}
+                      </span>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isCurrent && <Badge className="bg-blue-600 text-white hover:bg-blue-600">Agora</Badge>}
+                          {block.is_essential && (
+                            <Badge className="bg-amber-500 text-white hover:bg-amber-500">
+                              <Flag className="mr-1 h-3 w-3" /> Essencial
+                            </Badge>
+                          )}
+                          <span className="ml-auto text-[11px] opacity-50">
+                            {block.estimated_duration_seconds > 0 ? formatTime(block.estimated_duration_seconds) : 'Sem tempo definido'}
+                          </span>
+                        </div>
+
+                        <h2
+                          className={`mt-2 break-words font-bold leading-tight ${isCurrent ? 'text-xl sm:text-2xl' : 'text-base sm:text-lg'}`}
+                          style={isCurrent ? { fontSize: `${Math.max(22, fontSize - 2)}px` } : undefined}
+                        >
+                          {block.title}
+                        </h2>
+
+                        {blockSummary && (
+                          <p
+                            className={`mt-2 whitespace-pre-wrap leading-relaxed ${isCurrent ? mutedClasses : 'opacity-58'} ${isCurrent ? '' : 'line-clamp-3'}`}
+                            style={{ fontSize: `${isCurrent ? Math.max(MIN_FONT_SIZE, fontSize - 7) : 14}px` }}
+                          >
+                            {blockSummary}
+                          </p>
+                        )}
+
+                        {isCurrent && detailValue >= 3 && block.content && block.content !== block.summary && (
+                          <div
+                            className="mt-4 whitespace-pre-wrap border-t border-current/10 pt-4 leading-[1.65]"
+                            style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 4)}px` }}
+                          >
+                            {block.content}
+                          </div>
+                        )}
+
+                        {isCurrent && detailValue >= 4 && showAdditional && block.additional_content && (
+                          <div
+                            className={`mt-4 whitespace-pre-wrap rounded-2xl border border-current/10 p-4 leading-relaxed ${darkMode ? 'bg-white/5' : 'bg-black/[0.025]'}`}
+                            style={{ fontSize: `${Math.max(MIN_FONT_SIZE, fontSize - 7)}px` }}
+                          >
+                            {block.additional_content}
+                          </div>
+                        )}
+
+                        {isCurrent && block.id && (
+                          <div className="mt-4" onClick={(event) => event.stopPropagation()}>
+                            <BlockAttachmentsDisplay blockId={block.id} darkMode={darkMode} />
+                          </div>
+                        )}
                       </div>
                     </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <div className="mt-5 rounded-2xl border border-dashed border-current/15 p-4 text-center text-xs opacity-50">
-            Toque em qualquer tópico para ir diretamente até ele. O tópico atual permanece destacado enquanto você apresenta.
+            Toque em qualquer tópico para ir diretamente até ele. O tópico atual acompanha você durante a apresentação.
           </div>
         </div>
       </main>
@@ -1583,6 +1683,17 @@ export default function PresentMode() {
             </Button>
 
             <div className="flex min-w-0 items-center justify-center gap-1 sm:gap-2">
+              <Button
+                variant={presentationView === 'book' ? 'secondary' : 'ghost'}
+                onClick={() => setPresentationView((value) => (value === 'book' ? 'script' : 'book'))}
+                className={`gap-2 px-3 ${controlSizeClass}`}
+                aria-label={presentationView === 'book' ? 'Mudar para roteiro em cartões' : 'Mudar para modo livro'}
+                title={presentationView === 'book' ? 'Visual: Livro' : 'Visual: Roteiro'}
+              >
+                {presentationView === 'book' ? <BookOpen className="h-5 w-5" /> : <List className="h-5 w-5" />}
+                <span className="hidden lg:inline">{presentationView === 'book' ? 'Livro' : 'Roteiro'}</span>
+              </Button>
+
               <Button
                 variant="ghost"
                 onClick={() => setShowTopicSheet(true)}
