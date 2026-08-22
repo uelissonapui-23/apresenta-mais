@@ -1336,59 +1336,50 @@ export default function PresentationEditor() {
       </div>
 
       <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-3 py-5 sm:px-5 md:py-7 lg:px-8">
-        <section className="mb-5 rounded-2xl border bg-background p-3 shadow-sm sm:p-4 lg:p-5">
-          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">
+        <section className="mb-5 rounded-2xl border bg-background p-3 shadow-sm sm:p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-primary">
                 <Sparkles className="h-3.5 w-3.5" />
-                Como você quer trabalhar agora?
+                Modo de trabalho
               </p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Troque de modo sem perder conteúdo. Cada visão usa a mesma apresentação.
+              <p className="mt-1 text-xs text-muted-foreground">
+                O conteúdo é o mesmo. Mude apenas a forma de trabalhar.
               </p>
             </div>
-            <Badge variant="secondary" className="w-fit">{orderedBlocks.length} tópicos</Badge>
-          </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-            {VIEW_OPTIONS.map((option) => {
-              const Icon = option.icon;
-              const active = viewMode === option.key;
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => handleViewModeChange(option.key)}
-                  className={`group min-w-0 rounded-xl border p-3 text-left transition-all sm:p-4 ${
-                    active
-                      ? 'border-primary bg-primary/5 shadow-sm ring-1 ring-primary/20'
-                      : 'border-border/80 bg-background hover:border-primary/40 hover:bg-muted/30'
-                  }`}
-                >
-                  <div className="flex items-start gap-3">
-                    <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${active ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground group-hover:bg-primary/10 group-hover:text-primary'}`}>
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-semibold">{option.label}</span>
-                      <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                        {option.description}
-                      </span>
-                    </span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="mt-4 rounded-xl border bg-muted/20 p-3 sm:p-4">
-            <div className="mb-2 flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold">Quanto detalhe mostrar</p>
-                <p className="text-xs text-muted-foreground">Ajuste a quantidade de informação sem alterar o conteúdo salvo.</p>
-              </div>
+            <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4">
+              {VIEW_OPTIONS.map((option) => {
+                const Icon = option.icon;
+                const active = viewMode === option.key;
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => handleViewModeChange(option.key)}
+                    title={option.description}
+                    className={`flex min-w-0 items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all ${
+                      active
+                        ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                        : 'border-border/80 bg-background hover:border-primary/40 hover:bg-muted/40'
+                    }`}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{option.label}</span>
+                  </button>
+                );
+              })}
             </div>
-            <DetailLevelControl value={detailLevel} onChange={setDetailLevel} />
+          </div>
+
+          <div className="mt-3 flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{VIEW_OPTIONS.find((option) => option.key === viewMode)?.label}:</span>{' '}
+              {VIEW_OPTIONS.find((option) => option.key === viewMode)?.description}
+            </p>
+            <div className="shrink-0">
+              <DetailLevelControl value={detailLevel} onChange={setDetailLevel} />
+            </div>
           </div>
         </section>
 

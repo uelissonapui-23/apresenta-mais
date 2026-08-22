@@ -1441,22 +1441,13 @@ export default function PresentMode() {
         className="relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-3 pb-32 pt-20 sm:px-5 sm:pb-36 sm:pt-24 lg:px-8"
       >
         <div className={`mx-auto w-full py-4 sm:py-7 ${presentationView === 'book' ? 'max-w-4xl' : 'max-w-5xl'}`}>
-          <div className={`mb-4 rounded-2xl border px-4 py-3 shadow-sm ${panelClasses}`}>
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-[11px] font-bold uppercase tracking-[0.15em] opacity-45">
-                  {presentationView === 'book' ? 'Leitura contínua' : 'Roteiro ao vivo'}
-                </p>
-                <p className="mt-0.5 truncate text-sm font-semibold sm:text-base">
-                  {presentationView === 'book'
-                    ? 'Leia como um livro e avance naturalmente pelos tópicos.'
-                    : 'Acompanhe o fluxo inteiro sem perder o ponto atual.'}
-                </p>
-              </div>
-              <div className="flex items-center gap-2 text-xs opacity-60">
-                <span>{currentIndex + 1} de {visibleBlocks.length}</span>
-                {showTimer && <span className="font-mono">{formatTime(elapsed)}</span>}
-              </div>
+          <div className="mb-3 flex items-center justify-center">
+            <div data-no-stage-click className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] shadow-sm backdrop-blur ${panelClasses}`}>
+              {presentationView === 'book' ? <BookOpen className="h-3.5 w-3.5" /> : <List className="h-3.5 w-3.5" />}
+              <span className="font-semibold">{presentationView === 'book' ? 'Livro' : 'Roteiro'}</span>
+              <span className="opacity-35">•</span>
+              <span className="opacity-60">{currentIndex + 1}/{visibleBlocks.length}</span>
+              {showTimer && <span className="font-mono opacity-60">{formatTime(elapsed)}</span>}
             </div>
           </div>
 

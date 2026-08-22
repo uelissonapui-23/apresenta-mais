@@ -104,21 +104,22 @@ export default function Capture() {
       const sessionRows = await base44.entities.CaptureSession.filter({ user_id: user.id }, '-updated_at');
       const nextSessions = Array.isArray(sessionRows) ? sessionRows : [];
       setSessions(nextSessions);
-      const preferredId = activeSessionId || nextSessions[0]?.id || '';
-      setActiveSessionId(preferredId);
-      if (preferredId) {
-        const noteRows = await base44.entities.CaptureNote.filter({ session_id: preferredId }, 'order_index');
-        setNotes(sortNewest(noteRows));
-      } else {
-        setNotes([]);
-      }
+      // A lista de coletas é carregada uma única vez. As anotações são
+      // responsabilidade do efeito abaixo, evitando duas consultas iguais
+      // sempre que a coleta ativa muda.
+      setActiveSessionId((current) => (
+        current && nextSessions.some((item) => item.id === current)
+          ? current
+          : nextSessions[0]?.id || ''
+      ));
+      if (nextSessions.length === 0) setNotes([]);
     } catch (error) {
       console.error('Erro ao carregar coleta:', error);
       toast({ title: 'Não foi possível carregar suas anotações', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [activeSessionId, toast, user?.id]);
+  }, [toast, user?.id]);
 
   useEffect(() => {
     if (!userLoading && user?.id) load();
@@ -129,9 +130,14 @@ export default function Capture() {
     let cancelled = false;
     base44.entities.CaptureNote.filter({ session_id: activeSessionId }, 'order_index')
       .then((rows) => { if (!cancelled) setNotes(sortNewest(rows)); })
-      .catch((error) => console.error('Erro ao trocar coleta:', error));
+      .catch((error) => {
+        if (!cancelled) {
+          console.error('Erro ao trocar coleta:', error);
+          toast({ title: 'Não foi possível carregar esta coleta', variant: 'destructive' });
+        }
+      });
     return () => { cancelled = true; };
-  }, [activeSessionId]);
+  }, [activeSessionId, toast]);
 
   const createSession = async () => {
     if (!user?.id || saving) return;
