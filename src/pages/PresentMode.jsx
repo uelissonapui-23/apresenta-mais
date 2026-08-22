@@ -305,6 +305,7 @@ export default function PresentMode() {
   const loadingRef = useRef(false);
   const operationRef = useRef(false);
   const persistLockRef = useRef(false);
+  const progressSaveQueueRef = useRef(Promise.resolve());
 
   const [presentation, setPresentation] = useState(null);
   const [blocks, setBlocks] = useState([]);
@@ -845,61 +846,77 @@ export default function PresentMode() {
     return () => window.clearTimeout(controlTimerRef.current);
   }, [resetControlsTimer]);
 
-  const updateProgressStatus = useCallback(async (
+  const updateProgressStatus = useCallback((
     blockId,
     status,
     extra = {},
   ) => {
     const existing = progressRef.current.get(blockId);
-    if (!existing?.id) return null;
+    if (!existing?.id) return Promise.resolve(null);
 
     const updatedData = {
       status,
       ...extra,
     };
+    const optimisticRow = {
+      ...existing,
+      ...updatedData,
+    };
 
+    // Atualiza a interface e o ref imediatamente. A navegação não deve
+    // esperar a rede para responder. O salvamento segue em fila, em ordem.
+    progressRef.current.set(blockId, optimisticRow);
     setProgressRows((current) => current.map((row) => (
       row.id === existing.id
-        ? { ...row, ...updatedData }
+        ? optimisticRow
         : row
     )));
 
-    try {
-      const updated = await base44.entities.SessionBlockProgress.update(
-        existing.id,
-        updatedData,
-      );
+    const savePromise = progressSaveQueueRef.current
+      .catch(() => null)
+      .then(async () => {
+        try {
+          const updated = await base44.entities.SessionBlockProgress.update(
+            existing.id,
+            updatedData,
+          );
 
-      return updated || {
-        ...existing,
-        ...updatedData,
-      };
-    } catch (updateError) {
-      console.error('Erro ao atualizar progresso:', updateError);
+          if (updated) {
+            const currentRow = progressRef.current.get(blockId);
+            // Só incorpora o retorno remoto se nenhuma navegação posterior
+            // já tiver mudado novamente o estado deste tópico.
+            if (currentRow?.status === status) {
+              const merged = { ...currentRow, ...updated };
+              progressRef.current.set(blockId, merged);
+              setProgressRows((current) => current.map((row) => (
+                row.id === existing.id ? merged : row
+              )));
+            }
+          }
 
-      setProgressRows((current) => current.map((row) => (
-        row.id === existing.id
-          ? existing
-          : row
-      )));
+          return updated || optimisticRow;
+        } catch (updateError) {
+          console.error('Erro ao atualizar progresso:', updateError);
 
-      toast({
-        title: 'Não foi possível salvar o progresso',
-        description:
-          'A alteração foi desfeita para manter a sessão consistente.',
-        variant: 'destructive',
+          toast({
+            title: 'Não foi possível salvar o progresso',
+            description:
+              'A apresentação continua funcionando. Tente novamente em instantes.',
+            variant: 'destructive',
+          });
+
+          return null;
+        }
       });
 
-      return null;
-    }
+    progressSaveQueueRef.current = savePromise;
+    return savePromise;
   }, [toast]);
 
-  const activateIndex = useCallback(async (
+  const activateIndex = useCallback((
     targetIndex,
     { markPrevious = false, previousStatus = 'completed' } = {},
   ) => {
-    if (operationRef.current) return;
-
     if (
       targetIndex < 0
       || targetIndex >= visibleBlocks.length
@@ -908,17 +925,22 @@ export default function PresentMode() {
       return;
     }
 
-    operationRef.current = true;
+    const oldIndex = currentIndexRef.current;
+    const oldBlock = visibleBlocks[oldIndex];
+    const newBlock = visibleBlocks[targetIndex];
+    const now = new Date().toISOString();
+    const spentSeconds = Math.max(
+      0,
+      Math.round((Date.now() - blockStartedAtRef.current) / 1000),
+    );
 
-    try {
-      const oldIndex = currentIndexRef.current;
-      const oldBlock = visibleBlocks[oldIndex];
-      const newBlock = visibleBlocks[targetIndex];
-      const now = new Date().toISOString();
-      const spentSeconds = Math.max(
-        0,
-        Math.round((Date.now() - blockStartedAtRef.current) / 1000),
-      );
+    // PRIMEIRO troca a tela. Nenhum clique de navegação fica preso esperando
+    // Supabase/Base44. Isso torna Próximo, Anterior e toque no roteiro imediatos.
+    setCurrentIndex(targetIndex);
+    currentIndexRef.current = targetIndex;
+    blockStartedAtRef.current = Date.now();
+    setRunning(true);
+    resetControlsTimer();
 
     if (oldBlock) {
       const oldProgress = progressRef.current.get(oldBlock.id);
@@ -928,53 +950,43 @@ export default function PresentMode() {
           ? 'pending'
           : oldProgress?.status || 'pending';
 
-      await updateProgressStatus(oldBlock.id, status, {
-        completed_at: status === 'completed' ? now : oldProgress?.completed_at || '',
+      void updateProgressStatus(oldBlock.id, status, {
+        completed_at: status === 'completed'
+          ? now
+          : oldProgress?.completed_at || '',
         elapsed_seconds: asNumber(oldProgress?.elapsed_seconds) + spentSeconds,
       });
     }
 
-    for (const row of progressRef.current.values()) {
-      if (row.block_id !== newBlock.id && row.status === 'current') {
-        await updateProgressStatus(row.block_id, 'pending');
+    // Se houver algum registro antigo marcado como atual, ele é corrigido
+    // em segundo plano, sem bloquear a interface.
+    for (const row of Array.from(progressRef.current.values())) {
+      if (
+        row.block_id !== newBlock.id
+        && row.block_id !== oldBlock?.id
+        && row.status === 'current'
+      ) {
+        void updateProgressStatus(row.block_id, 'pending');
       }
     }
 
     const newProgress = progressRef.current.get(newBlock.id);
-    await updateProgressStatus(newBlock.id, 'current', {
+    void updateProgressStatus(newBlock.id, 'current', {
       started_at: now,
       completed_at: newProgress?.completed_at || '',
       visit_count: asNumber(newProgress?.visit_count) + 1,
     });
 
-    setCurrentIndex(targetIndex);
-    currentIndexRef.current = targetIndex;
-    blockStartedAtRef.current = Date.now();
-
     if (sessionRef.current?.id) {
-      await base44.entities.PresentationSession.update(sessionRef.current.id, {
+      // Salva a posição da sessão em segundo plano. Uma lentidão de rede não
+      // pode mais impedir o apresentador de continuar falando/navegando.
+      void base44.entities.PresentationSession.update(sessionRef.current.id, {
         current_block_id: newBlock.id,
         status: 'active',
         paused_at: '',
+      }).catch((navigationError) => {
+        console.error('Erro ao salvar posição da apresentação:', navigationError);
       });
-    }
-
-      setRunning(true);
-      resetControlsTimer();
-    } catch (navigationError) {
-      console.error(
-        'Erro ao trocar de tópico:',
-        navigationError,
-      );
-
-      toast({
-        title: 'Não foi possível trocar de tópico',
-        description:
-          'A sessão foi mantida no tópico atual.',
-        variant: 'destructive',
-      });
-    } finally {
-      operationRef.current = false;
     }
   }, [resetControlsTimer, updateProgressStatus, visibleBlocks]);
 
