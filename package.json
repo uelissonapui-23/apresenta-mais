@@ -1,7 +1,7 @@
 {
   "name": "apresenta-mais",
   "private": true,
-  "version": "0.1.0-migration",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "check:migration-foundation": "node scripts/check-migration-foundation.mjs",
     "check:security": "node scripts/check-security-foundation.mjs",
-    "check:release": "npm run lint && npm run typecheck && npm run check:migration-foundation && npm run check:security && node scripts/check-release-readiness.mjs && npm run build"
+    "check:release": "npm run lint && npm run typecheck && npm run check:migration-foundation && npm run check:security && npm run check:ui && node scripts/check-release-readiness.mjs && npm run build",
+    "check:ui": "node scripts/check-ui-safety.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",

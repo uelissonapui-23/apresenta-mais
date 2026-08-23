@@ -42,6 +42,16 @@ if (fs.existsSync(path.join(root, hardeningMigration))) {
   assert(sql.includes("public = false"), 'Bucket de arquivos deve ser privado.');
 }
 
+
+const releaseHardeningMigration = 'supabase/migrations/20260823020000_release_security_hardening.sql';
+assert(fs.existsSync(path.join(root, releaseHardeningMigration)), 'Migration final de hardening ausente.');
+if (fs.existsSync(path.join(root, releaseHardeningMigration))) {
+  const sql = read(releaseHardeningMigration);
+  assert(sql.includes('capture_sessions_active_account'), 'Coletas precisam bloquear contas inativas no servidor.');
+  assert(sql.includes('capture_notes_active_account'), 'Anotações precisam bloquear contas inativas no servidor.');
+  assert(sql.includes('set search_path = pg_catalog, apresenta_mais'), 'SECURITY DEFINER precisa de search_path restrito.');
+}
+
 const envExample = read('.env.example');
 assert(!envExample.includes('VITE_BASE44_APP_ID'), '.env.example não deve orientar configuração Base44.');
 assert(!envExample.includes('VITE_BACKEND_PROVIDER=base44'), '.env.example não deve ativar Base44.');

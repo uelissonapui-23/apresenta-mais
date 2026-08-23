@@ -1942,6 +1942,8 @@ export default function PresentMode() {
                 <Button
                   variant="outline"
                   size="icon"
+                  aria-label="Diminuir tamanho do texto"
+                  title="Diminuir texto"
                   onClick={() => setFontSize((value) => clamp(value - 2, MIN_FONT_SIZE, MAX_FONT_SIZE))}
                 >
                   <Minus className="h-4 w-4" />
@@ -1952,6 +1954,8 @@ export default function PresentMode() {
                 <Button
                   variant="outline"
                   size="icon"
+                  aria-label="Aumentar tamanho do texto"
+                  title="Aumentar texto"
                   onClick={() => setFontSize((value) => clamp(value + 2, MIN_FONT_SIZE, MAX_FONT_SIZE))}
                 >
                   <Plus className="h-4 w-4" />

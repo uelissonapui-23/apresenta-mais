@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const root = process.cwd();
 const failures = [];
@@ -15,6 +16,29 @@ function fail(message) {
 
 function warn(message) {
   warnings.push(message);
+}
+
+
+function readFileSafe(relativePath) {
+  try {
+    return fs.readFileSync(path.join(root, relativePath), 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function readGitTrackedFiles() {
+  try {
+    const output = execFileSync('git', ['ls-files'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return new Set(output.split(/\r?\n/).filter(Boolean));
+  } catch {
+    warn('Não foi possível consultar o índice Git neste ambiente.');
+    return null;
+  }
 }
 
 const requiredFiles = [
@@ -67,8 +91,8 @@ if (fs.existsSync(tempDir)) {
   warn('supabase/.temp existe localmente. Ele está ignorado pelo Git e pode ser removido quando quiser.');
 }
 
-const scanRoots = ['src', 'scripts', '.github'];
-const textExtensions = new Set(['.js', '.jsx', '.mjs', '.ts', '.tsx', '.yml', '.yaml', '.json']);
+const scanRoots = ['src', 'scripts', '.github', 'supabase'];
+const textExtensions = new Set(['.js', '.jsx', '.mjs', '.ts', '.tsx', '.yml', '.yaml', '.json', '.sql', '.toml']);
 const conflictPattern = /^(<{7}|={7}|>{7})/m;
 const secretPatterns = [
   /SUPABASE_DB_URL\s*=\s*['\"][^$]/i,
@@ -107,6 +131,25 @@ for (const scanRoot of scanRoots) {
       if (pattern.test(content)) {
         fail(`Possível segredo gravado diretamente em ${relative}`);
       }
+    }
+  }
+}
+
+
+const viteConfig = readFileSafe('vite.config.js');
+if (viteConfig && /manualChunks\s*[:(]/.test(viteConfig)) {
+  fail('vite.config.js voltou a usar manualChunks. Essa estratégia já causou tela branca em produção.');
+}
+
+const gitIndex = readGitTrackedFiles();
+if (gitIndex) {
+  if (!gitIndex.has('.env.example')) {
+    fail('.env.example precisa permanecer versionado como documentação de configuração.');
+  }
+
+  for (const unsafeEnv of ['.env', '.env.local', '.env.production', '.env.development']) {
+    if (gitIndex.has(unsafeEnv)) {
+      fail(`Arquivo de segredo não pode estar versionado: ${unsafeEnv}`);
     }
   }
 }

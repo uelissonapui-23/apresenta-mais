@@ -1,6 +1,7 @@
-#env
+# Environment secrets
 .env
 .env.*
+!.env.example
 
 # Logs
 /logs
@@ -33,3 +34,8 @@ base44/.app.jsonc
 
 # Supabase CLI local cache
 supabase/.temp/
+
+# Local delivery/audit artifacts
+APLICAR-*.txt
+RELATORIO-*.md
+LEIA-ME-FECHAMENTO-*.txt
