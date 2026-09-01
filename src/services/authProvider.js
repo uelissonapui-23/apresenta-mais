@@ -19,7 +19,13 @@ function throwIfError(error) { if (error) throw error; }
 
 export const authProvider = {
   async me() {
-    const { data, error } = await getSupabaseClient().auth.getUser();
+    const client = getSupabaseClient();
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      const { data, error } = await client.auth.getSession();
+      throwIfError(error);
+      return normalizeSupabaseUser(data?.session?.user);
+    }
+    const { data, error } = await client.auth.getUser();
     if (error?.name === 'AuthSessionMissingError') return null;
     throwIfError(error);
     return normalizeSupabaseUser(data?.user);
@@ -41,21 +47,11 @@ export const authProvider = {
     const session = data?.session || null;
     const user = normalizeSupabaseUser(data?.user);
     const requiresVerification = Boolean(user && !session);
-    return {
-      user,
-      session,
-      requires_verification: requiresVerification,
-      verification_required: requiresVerification,
-      email_verified: Boolean(session || data?.user?.email_confirmed_at),
-    };
+    return { user, session, requires_verification: requiresVerification, verification_required: requiresVerification, email_verified: Boolean(session || data?.user?.email_confirmed_at) };
   },
 
   async verifyOtp({ email, token, code }) {
-    const { data, error } = await getSupabaseClient().auth.verifyOtp({
-      email,
-      token: token || code,
-      type: 'signup',
-    });
+    const { data, error } = await getSupabaseClient().auth.verifyOtp({ email, token: token || code, type: 'signup' });
     throwIfError(error);
     return data;
   },
@@ -67,10 +63,7 @@ export const authProvider = {
   },
 
   async loginWithProvider(provider, callbackUrl) {
-    const { data, error } = await getSupabaseClient().auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: callbackUrl },
-    });
+    const { data, error } = await getSupabaseClient().auth.signInWithOAuth({ provider, options: { redirectTo: callbackUrl } });
     throwIfError(error);
     return data;
   },
