@@ -1,13 +1,5 @@
 import { getSupabaseEntity as getOnlineEntity, isMigratedEntity } from '@/services/data/supabaseEntityAdapter';
-import {
-  cacheRows,
-  flushMutationQueue,
-  getCachedRow,
-  getCachedRows,
-  isOffline,
-  queueMutation,
-  removeCachedRow,
-} from '@/services/data/offlineStore';
+import { cacheRows, flushMutationQueue, getCachedRow, getCachedRows, isOffline, queueMutation, removeCachedRow } from '@/services/data/offlineStore';
 
 const adapters = new Map();
 
@@ -44,7 +36,11 @@ async function syncQueue() {
     const online = getOnlineEntity(entityName);
     if (operation === 'update') await online.update(id, payload);
     if (operation === 'delete') await online.delete(id);
-    if (operation === 'create') await online.create(payload);
+    if (operation === 'create') {
+      const clean = { ...payload };
+      delete clean._offline_pending;
+      await online.create(clean);
+    }
   });
 }
 
@@ -57,6 +53,24 @@ if (typeof window !== 'undefined') {
 function createOfflineAdapter(entityName) {
   const online = getOnlineEntity(entityName);
   const tableKey = entityName;
+
+  const create = async (payload) => {
+    if (!isOffline()) {
+      const row = await online.create(payload);
+      await cacheRows(tableKey, [row]);
+      return row;
+    }
+    const row = {
+      ...payload,
+      id: payload?.id || crypto.randomUUID(),
+      created_date: new Date().toISOString(),
+      updated_date: new Date().toISOString(),
+      _offline_pending: true,
+    };
+    await cacheRows(tableKey, [row]);
+    await queueMutation({ entityName, operation: 'create', payload: row });
+    return row;
+  };
 
   return Object.freeze({
     async list(sort, limit) {
@@ -102,27 +116,11 @@ function createOfflineAdapter(entityName) {
       return getCachedRow(tableKey, id);
     },
 
-    async create(payload) {
-      if (!isOffline()) {
-        const row = await online.create(payload);
-        await cacheRows(tableKey, [row]);
-        return row;
-      }
-      const row = {
-        ...payload,
-        id: payload?.id || crypto.randomUUID(),
-        created_date: new Date().toISOString(),
-        updated_date: new Date().toISOString(),
-        _offline_pending: true,
-      };
-      await cacheRows(tableKey, [row]);
-      await queueMutation({ entityName, operation: 'create', payload: row });
-      return row;
-    },
+    create,
 
     async bulkCreate(rows = []) {
       const created = [];
-      for (const row of rows) created.push(await this.create(row));
+      for (const row of rows) created.push(await create(row));
       return created;
     },
 
