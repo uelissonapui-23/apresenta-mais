@@ -1,4 +1,4 @@
-import { getSupabaseEntity, isMigratedEntity } from '@/services/data/supabaseEntityAdapter';
+import { getSupabaseEntity, isMigratedEntity } from '@/services/data/offlineEntityAdapter';
 import { uploadUserFile } from '@/services/storageRepository';
 
 const DISABLED_ENTITIES = new Set([
@@ -25,9 +25,6 @@ const entities = new Proxy({}, {
   },
 });
 
-// Nome mantido temporariamente para evitar uma refatoração enorme das telas.
-// Não existe mais SDK, API, analytics ou backend Base44 por trás deste objeto.
-/** @type {any} */
 export const base44 = Object.freeze({
   entities,
   integrations: Object.freeze({
